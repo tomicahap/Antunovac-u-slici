@@ -16,12 +16,18 @@ const { decrypt } = require('./encryption');
 function createOAuth2Client(session) {
   let clientId = process.env.GOOGLE_CLIENT_ID;
   let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  let redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/callback';
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI;
 
   if (session && session.oauthConfig) {
     clientId = session.oauthConfig.clientId || clientId;
     clientSecret = session.oauthConfig.clientSecret || clientSecret;
-    redirectUri = session.oauthConfig.redirectUri || redirectUri;
+    if (!redirectUri) {
+      redirectUri = session.oauthConfig.redirectUri;
+    }
+  }
+
+  if (!redirectUri) {
+    redirectUri = 'http://localhost:3000/api/auth/callback';
   }
 
   if (!clientId || !clientSecret) {
