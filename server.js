@@ -1,0 +1,91 @@
+require('dotenv').config();
+
+// Zaobilaženje lokalnih SSL problema u development okruženju
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.warn('⚠️ UPOZORENJE: NODE_TLS_REJECT_UNAUTHORIZED je postavljen na 0 zbog lokalnog razvoja.');
+}
+
+const express = require('express');
+const cookieSession = require('cookie-session');
+const path = require('path');
+
+const authRoutes = require('./routes/auth');
+const driveRoutes = require('./routes/drive');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ─── Middleware ──────────────────────────────────────────────────────────────
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Stateless cookie-based session (nema potrebe za Redisom)
+// Refresh token se enkriptira i sprema u HttpOnly cookie
+app.use(cookieSession({
+  name: 'agf_session',
+  keys: [
+    process.env.SESSION_SECRET || 'fallback-secret-CHANGE-IN-PRODUCTION',
+    process.env.SESSION_SECRET_OLD || 'fallback-secret-old'
+  ],
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 dana
+  secure: process.env.NODE_ENV === 'production',
+  httpOnly: true,
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  overwrite: true
+}));
+
+// ─── API Rute ────────────────────────────────────────────────────────────────
+
+app.use('/api/auth', authRoutes);
+app.use('/api/drive', driveRoutes);
+
+// Konfiguracija za frontend (Firebase config iz env varijabli)
+app.get('/api/config', (req, res) => {
+  res.json({
+    firebase: {
+      apiKey: process.env.FIREBASE_API_KEY || '',
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || '',
+      projectId: process.env.FIREBASE_PROJECT_ID || '',
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
+      appId: process.env.FIREBASE_APP_ID || ''
+    },
+    googleClientId: process.env.GOOGLE_CLIENT_ID || ''
+  });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ─── Frontend Static Files ───────────────────────────────────────────────────
+
+app.use('/thumbs', express.static(path.join(__dirname, 'thumbs')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// SPA fallback – sve nepoznate rute vraćaju index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ─── Globalni error handler ──────────────────────────────────────────────────
+
+app.use((err, req, res, next) => {
+  console.error('[Server Error]', err.message);
+  res.status(err.status || 500).json({
+    error: err.message || 'Interna greška servera'
+  });
+});
+
+// ─── Start ───────────────────────────────────────────────────────────────────
+
+app.listen(PORT, () => {
+  console.log(`\n🚀 Server pokrenut na http://localhost:${PORT}`);
+  console.log(`   Okolina: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   Firebase projekt: ${process.env.FIREBASE_PROJECT_ID || '(nije konfiguriran)'}\n`);
+});
+
+module.exports = app;

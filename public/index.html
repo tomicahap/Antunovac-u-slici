@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antunovac u slici – Arhivske fotografije</title>
+  <meta name="description" content="Aplikacija za obradu arhivskih i obiteljskih fotografija s označavanjem lica i Google Drive sinkronizacijom. Namijenjena rodoslovnom istraživanju.">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <!-- Application CSS -->
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SPLASH SCREEN – prikazuje se dok se app inicijalizira
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="splash-screen" class="splash">
+  <div class="splash-content">
+    <div class="splash-logo">
+      <img src="/thumbs/antunovac_znak.gif" alt="Antunovac u slici logo" class="splash-logo-img">
+    </div>
+    <h1 class="splash-title">Antunovac u slici</h1>
+    <p class="splash-subtitle">Arhivske fotografije</p>
+    <div class="splash-spinner"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MAIN APP WRAPPER
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="app" class="app" style="display:none;">
+
+  <!-- ─── NAVIGATION BAR ──────────────────────────────────────────────────── -->
+  <nav class="navbar" id="main-navbar">
+    <div class="nav-brand">
+      <img src="/thumbs/antunovac_znak.gif" alt="Antunovac u slici logo" class="nav-logo-img">
+      <span class="nav-brand-text">Antunovac u slici</span>
+    </div>
+
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Izbornik" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+
+    <ul class="nav-links" id="nav-links" role="navigation">
+      <li><a href="#" class="nav-link active" data-view="gallery" id="nav-gallery">
+        <svg viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/><rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/></svg>
+        Galerija
+      </a></li>
+      <li><a href="#" class="nav-link" data-view="editor" id="nav-editor">
+        <svg viewBox="0 0 20 20"><path d="M3 17l4-1 9-9-3-3-9 9-1 4zm11-11l2-2-3-3-2 2 3 3z" stroke-linecap="round"/></svg>
+        Označavanje
+      </a></li>
+      <li><a href="#" class="nav-link" data-view="persons" id="nav-persons">
+        <svg viewBox="0 0 20 20"><circle cx="10" cy="6" r="3"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6"/></svg>
+        Osobe i Pretraga
+      </a></li>
+      <li><a href="#" class="nav-link" data-view="comments" id="nav-comments">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h4l4 4V17h4c1.1 0 2-.9 2-2V5z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Komentari
+      </a></li>
+      <li><a href="#" class="nav-link" data-view="export" id="nav-export">
+        <svg viewBox="0 0 20 20"><path d="M10 3v10M6 9l4 4 4-4M3 15v2h14v-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Uvoz/Izvoz
+      </a></li>
+      <li><a href="#" class="nav-link" data-view="settings" id="nav-settings">
+        <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5"/><path d="M10 3v1.5m0 11V17m-7-7h1.5m11 0H17M4.9 4.9l1 1m8.2 8.2 1 1M4.9 15.1l1-1m8.2-8.2 1-1"/></svg>
+        Postavke
+      </a></li>
+    </ul>
+
+    <div class="nav-user" id="nav-user">
+      <!-- Lock button for Admin Login / Role Status -->
+      <button class="btn btn-outline btn-xs" id="nav-btn-lock" title="Prijava administratora">
+        🔒 Prijava
+      </button>
+      <button class="btn btn-ghost btn-xs hidden" id="nav-btn-logout" title="Odjava">
+        Odjava
+      </button>
+    </div>
+  </nav>
+
+  <!-- ─── MAIN CONTENT ─────────────────────────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- ══════════════════ POGLED: GALERIJA ══════════════════ -->
+    <section id="view-gallery" class="view active">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Galerija fotografija</h1>
+          <p class="view-subtitle" id="gallery-folder-name">Odaberite mapu u Postavkama za prikaz slika</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-outline btn-sm" id="btn-refresh-gallery" title="Osvježi popis">
+            <svg viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 1 1.8 4.3M4 14V10H8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Osvježi
+          </button>
+          <button class="btn btn-primary btn-sm" id="btn-select-folder">
+            <svg viewBox="0 0 20 20"><path d="M2 7h16v10H2z M2 7l3-4h6l2 2h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Odaberi mapu
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="gallery-filter-bar">
+        <div class="gallery-tabs">
+          <button class="btn btn-outline gallery-tab-btn active" data-tab="portraits" id="tab-gallery-portraits">Portreti osoba</button>
+          <button class="btn btn-outline gallery-tab-btn" data-tab="images" id="tab-gallery-images">Fotografije</button>
+        </div>
+        
+        <!-- Admin sub-filteri za fotografije -->
+        <div class="gallery-subtabs" id="gallery-subtabs" style="display: none; gap: var(--space-xs); margin-left: 10px;">
+          <button class="btn btn-outline btn-xs active" data-subtab="untagged" id="subtab-gallery-untagged">Neoznaene</button>
+          <button class="btn btn-outline btn-xs" data-subtab="tagged" id="subtab-gallery-tagged">Oznaene</button>
+          <button class="btn btn-outline btn-xs" data-subtab="all" id="subtab-gallery-all">Sve slike</button>
+        </div>
+        <div class="search-input-wrap" style="flex: 1; max-width: 300px;">
+          <svg viewBox="0 0 20 20" class="search-icon"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3" stroke-linecap="round"/></svg>
+          <input type="text" id="gallery-search-input" class="search-input" placeholder="Pretraži slike..." aria-label="Pretraži slike">
+        </div>
+        <div class="gallery-stats" id="gallery-stats">
+          <span id="gallery-count">0 fotografija</span>
+        </div>
+      </div>
+
+      <!-- Grid fotografija -->
+      <div class="gallery-grid" id="gallery-grid">
+        <div class="gallery-empty" id="gallery-empty">
+          <svg viewBox="0 0 64 64" fill="none">
+            <rect x="8" y="12" width="48" height="36" rx="4" stroke="currentColor" stroke-width="2"/>
+            <circle cx="24" cy="26" r="4" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 38 L20 28 L30 34 L40 24 L56 38" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <p>Nema fotografija u odabranoj mapi.</p>
+          <p class="text-muted">Odaberite ulaznu mapu u Postavkama.</p>
+          <button class="btn btn-primary" data-view="settings" id="btn-go-settings">Idi na Postavke</button>
+        </div>
+      </div>
+
+      <!-- Load more -->
+      <div class="gallery-load-more" id="gallery-load-more" style="display:none;">
+        <button class="btn btn-outline" id="btn-load-more">Učitaj još...</button>
+      </div>
+    </section>
+
+    <!-- ══════════════════ POGLED: EDITOR ══════════════════ -->
+    <section id="view-editor" class="view editor-layout" style="height: 100vh; flex-direction: column; padding: 0; overflow: hidden; position: relative;">
+      
+      <!-- Gornja zajednika traka editora (filename, darovatelj, gumbi) -->
+      <div class="editor-topbar" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bg-surface); border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 60px;">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <button class="btn btn-ghost btn-sm" id="btn-back-to-gallery" title="Natrag na galeriju">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M13 16l-5-5 5-5" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          </button>
+          <span class="editor-filename" id="editor-filename" style="font-weight: 600; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Odaberite fotografiju</span>
+          
+          <div class="editor-image-donor-wrap" id="editor-image-donor-wrap" style="display: flex; align-items: center; gap: 8px;">
+            <label for="editor-image-donor" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Darovao/Izvor:</label>
+            <input type="text" class="form-input form-input-xs" id="editor-image-donor" placeholder="Unesite ime darovatelja..." style="width: 180px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); padding: 4px 8px; font-size: 0.8rem;">
+          </div>
+        </div>
+        
+        <div>
+          <button class="btn btn-primary btn-sm" id="btn-save-done" title="Zavrai oznaavanje ove slike" style="display: flex; align-items: center; gap: 6px;">
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M4 11l4 4 8-8" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
+            GOTOVO
+          </button>
+        </div>
+      </div>
+      
+      <!-- Glavno tijelo editora (Dva stupca: Lijevo workspace, Desno sidebar) -->
+      <div class="editor-body" style="flex: 1; display: flex; overflow: hidden; position: relative;">
+        
+        <!-- LIJEVI STUPAC (Glavni radni prostor): Zoom bar i slika -->
+        <div class="editor-workspace" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); position: relative; border-right: 1px solid var(--border);">
+          
+          <!-- Gornja traka s kontrolama zuma i dodavanja okvira -->
+          <div class="workspace-toolbar" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border); flex-shrink: 0;">
+            <!-- Lijevo: Gumb Dodaj okvir -->
+            <div>
+              <button class="btn btn-primary btn-sm" id="btn-add-tag-frame" title="Dodaj okvir na sredinu ekrana" style="display: flex; align-items: center; gap: 6px;">
+                <svg viewBox="0 0 20 20" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 5v10M5 10h10" stroke-linecap="round"/></svg>
+                Dodaj okvir
+              </button>
+            </div>
+            
+            <!-- Desno: Grupirani Zoom -->
+            <div class="zoom-controls" style="display: flex; align-items: center; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 2px 4px; gap: 4px;">
+              <button class="btn btn-ghost btn-xs" id="btn-zoom-out" title="Umanji (-)">
+                <svg viewBox="0 0 20 20" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M5 10h10" stroke-linecap="round"/></svg>
+              </button>
+              <span class="zoom-level" id="zoom-level" style="font-size: 0.8rem; font-weight: 600; min-width: 45px; text-align: center;">100%</span>
+              <button class="btn btn-ghost btn-xs" id="btn-zoom-in" title="Poveaj (+)">
+                <svg viewBox="0 0 20 20" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M10 5v10M5 10h10" stroke-linecap="round"/></svg>
+              </button>
+              <button class="btn btn-ghost btn-xs" id="btn-zoom-fit" title="Prilagodi prozoru (F)">
+                <svg viewBox="0 0 20 20" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Prikaz slike (Canvas wrapper) -->
+          <div class="canvas-wrapper" id="canvas-wrapper" style="flex: 1; min-height: 0; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <canvas id="main-canvas" tabindex="0" aria-label="Platno za oznaavanje fotografija" style="max-width: 100%; max-height: 100%; object-fit: contain; background: #000; outline: none;"></canvas>
+            <div class="canvas-crosshair" id="canvas-crosshair" style="position: absolute; pointer-events: none; display: none;"></div>
+            <div class="canvas-overlay-msg" id="canvas-overlay-msg" style="position: absolute; pointer-events: none; text-align: center; color: var(--text-muted); font-size: 0.9rem;">
+              <p>Uitavanje fotografije...</p>
+            </div>
+          </div>
+          
+        </div>
+        
+        <!-- DESNI PANEL (Sidebar za pretragu i detalje) -->
+        <aside class="editor-sidebar" id="editor-sidebar" style="width: var(--sidebar-w, 650px); display: flex; flex-direction: column; background: var(--bg-surface); flex-shrink: 0; overflow: hidden; position: relative;">
+          
+          <div class="sidebar-header" style="padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+            <h2 style="font-size: 0.9rem; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">Oznake na slici</h2>
+            <span class="tag-count-badge" id="tag-count-badge" style="background: var(--primary-subtle); color: var(--primary); font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 12px;">0</span>
+          </div>
+          
+          <!-- Glavni scroll kontejner za sidebar -->
+          <div class="sidebar-scroll" id="sidebar-main-scroll" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 16px; gap: 16px; min-height: 0;">
+            
+            <!-- Popis svih oznaka (prikazuje se kad nije selektiran nijedan tag) -->
+            <div id="sidebar-tags-list-container" style="display: flex; flex-direction: column; gap: 12px; flex: 1;">
+              <ul class="tags-list" id="tags-list" role="list" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px;">
+                <!-- Tags se generiraju dinamiki -->
+              </ul>
+              <div class="tags-empty" id="tags-empty" style="text-align: center; padding: 24px; color: var(--text-muted);">
+                <svg viewBox="0 0 48 48" fill="none" width="32" height="32" style="margin: 0 auto 12px; display: block; opacity: 0.6;"><rect x="8" y="8" width="32" height="32" rx="3" stroke="currentColor" stroke-width="2" stroke-dasharray="4 2"/><path d="M18 24h12M24 18v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <p style="font-size: 0.8rem; line-height: 1.4; margin: 0;">Nema oznaka.<br>Pritisnite "Dodaj okvir" da biste oznaili osobu.</p>
+              </div>
+            </div>
+            
+            <!-- PANEL ZA PRETRA}IVANJE I DETALJE (Prikazuje se kad je tag selektiran) - Dva stupca -->
+            <div id="sidebar-person-selector" style="display: none; flex-direction: row; gap: 16px; flex: 1; min-height: 0; align-items: stretch;">
+              
+              <!-- STUPAC 1 (Desni dio splitscreen-a ali s lijeve strane): Za odabir osobe kada se povezuje sa okvirom -->
+              <div class="sidebar-selector-col-left" style="width: 50%; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid var(--border); padding-right: 16px; min-height: 0;">
+                
+                <!-- Forme za pretragu (ime i prezime) -->
+                <div class="tag-search-container" style="display: flex; flex-direction: column; gap: 10px; background: var(--bg-base); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0;">
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">TRA}I OSOBU:</div>
+                  
+                  <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="position: relative;">
+                      <input type="text" class="tag-search-input" id="sidebar-filter-ime" placeholder="Ime..." autocomplete="off" style="width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none; transition: border-color var(--transition-fast);">
+                    </div>
+                    
+                    <div style="position: relative;">
+                      <input type="text" class="tag-search-input" id="sidebar-filter-prezime" placeholder="Prezime (djevojako, roditelji)..." autocomplete="off" style="width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none; transition: border-color var(--transition-fast);">
+                      <button id="sidebar-filter-clear" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: none; padding: 4px;"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                    </div>
+                  </div>
+                  
+                  <!-- Rezultati pretrage (Inline autocomplete dropdown) -->
+                  <div class="autocomplete-dropdown" id="sidebar-autocomplete-dropdown" style="display: block; position: static !important; max-height: 200px; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 4px;">
+                    <div style="padding: 10px; font-size: 0.8rem; color: var(--text-muted); text-align: center;">Ponite upisivati za pretragu...</div>
+                  </div>
+                </div>
+                
+                <!-- Aktivna oznaka status -->
+                <div style="display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;">
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Aktivna oznaka:</div>
+                  <div class="tag-chip" id="tag-active-chip" style="background: rgba(79, 142, 247, 0.1); border: 1px solid rgba(79, 142, 247, 0.3); color: var(--primary); padding: 6px 12px; border-radius: var(--radius-md); font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+                    <span id="tag-active-chip-name">Odaberite osobu</span>
+                    <svg id="tag-active-chip-clear" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="cursor: pointer;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </div>
+                </div>
+
+              </div>
+              
+              <!-- STUPAC 2: Live Preview & Osoba info (ime i prezime, godine roenja i smrti, ime supru~nika i imena roditelja) -->
+              <div class="sidebar-selector-col-right" style="width: 50%; display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+                
+                <div class="tag-person-profile-card" style="display: flex; flex-direction: column; gap: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; flex: 1; overflow-y: auto; min-height: 0;">
+                  <!-- Prikaz slike (crop-preview) -->
+                  <div style="display: flex; justify-content: center; background: #000; border-radius: 8px; border: 1px solid var(--border); overflow: hidden; height: 160px; position: relative; flex-shrink: 0;">
+                    <canvas id="crop-preview" width="160" height="160" style="width: 100%; height: 100%; object-fit: contain; filter: sepia(0.2) contrast(1.05);"></canvas>
+                  </div>
+                  
+                  <!-- Podaci o osobi -->
+                  <div id="preview-person-info" style="font-size: 0.85rem; line-height: 1.5; color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+                    <div style="color: var(--text-muted); text-align: center; padding-top: 10px;">Osoba nije povezana.</div>
+                  </div>
+                  
+                  <!-- Obiteljske veze -->
+                  <div class="tag-family-details">
+                    <h4 style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px;">Obitelj i veze:</h4>
+                    <div id="preview-family-info" style="font-size: 0.8rem; color: var(--text-secondary);">
+                      <!-- Poveznice -->
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Gumb "Obriai okvir" na dnu desnog stupca -->
+                <div style="margin-top: auto; padding-top: 10px; flex-shrink: 0;">
+                  <button class="btn btn-outline btn-sm btn-full" id="btn-sidebar-delete-tag" style="color: var(--danger); border-color: var(--danger); display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; width: 100%;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                    Obriai okvir
+                  </button>
+                </div>
+                
+              </div>
+              
+            </div>
+            
+          </div>
+          
+          <!-- 5. Export portreta i Komentari (Uvijek na dnu) -->
+          <div class="sidebar-footer" style="padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0;">
+            <button class="btn btn-outline btn-sm btn-full" id="btn-export-all-portraits" style="display: none; width: 100%;">
+              Izvezi sve portrete
+            </button>
+          </div>
+        </aside>
+      </div></section><section id="view-persons" class="view">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Baza i Pretraga Osoba</h1>
+          <p class="view-subtitle" id="persons-count-subtitle">0 osoba u bazi</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-primary btn-sm" id="btn-add-person">
+            <svg viewBox="0 0 20 20"><path d="M10 3v14M3 10h14" stroke-linecap="round"/></svg>
+            Nova osoba
+          </button>
+        </div>
+      </div>
+
+      <!-- Sticky Filtri i Pretraga -->
+      <div style="position: sticky; top: -24px; z-index: 100; background: var(--bg-base); padding: 24px 0 12px 0; margin-top: -24px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+        <div class="card" style="padding: 15px; margin-bottom: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+
+          <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; font-size: 0.85rem;">
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Ime</label>
+              <input type="text" class="form-input form-input-xs" id="filter-ime" placeholder="Ime...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Prezime</label>
+              <input type="text" class="form-input form-input-xs" id="filter-prezime" placeholder="Prezime...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Djevojačko</label>
+              <input type="text" class="form-input form-input-xs" id="filter-djevojacko" placeholder="Djevojačko...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Roditelj</label>
+              <input type="text" class="form-input form-input-xs" id="filter-roditelj" placeholder="Ime roditelja...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Supružnik</label>
+              <input type="text" class="form-input form-input-xs" id="filter-supruznik" placeholder="Ime supružnika...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Dijete</label>
+              <input type="text" class="form-input form-input-xs" id="filter-dijete" placeholder="Ime djeteta...">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Rođen (od - do)</label>
+              <div style="display:flex; gap:4px;">
+                <input type="number" class="form-input form-input-xs" id="filter-rod-od" placeholder="1850" style="width:50%;">
+                <input type="number" class="form-input form-input-xs" id="filter-rod-do" placeholder="1920" style="width:50%;">
+              </div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Umro (od - do)</label>
+              <div style="display:flex; gap:4px;">
+                <input type="number" class="form-input form-input-xs" id="filter-sm-od" placeholder="1900" style="width:50%;">
+                <input type="number" class="form-input form-input-xs" id="filter-sm-do" placeholder="1980" style="width:50%;">
+              </div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:0.75rem;">Sortiranje</label>
+              <select class="select-input select-input-xs" id="persons-sort" style="height:28px; padding:2px 6px;">
+                <option value="prezime">Prezime (A-Z)</option>
+                <option value="ime">Ime (A-Z)</option>
+                <option value="godina_rodenja">Godina rođenja</option>
+                <option value="slika_count">Broj slika</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Popis osoba (Lista/Tablica) -->
+      <div class="table-container card" style="padding: 0; overflow-x: auto;">
+        <table class="persons-list-table" style="width:100%; border-collapse: collapse; font-size: 0.85rem;">
+          <thead>
+            <tr style="background: var(--bg-surface-secondary); border-bottom: 1px solid var(--border-color); text-align: left;">
+              <th style="padding: 10px 12px;">Ime</th>
+              <th style="padding: 10px 12px;">Prezime (i Djevojačko)</th>
+              <th style="padding: 10px 12px;">Rođenje – Smrt</th>
+              <th style="padding: 10px 12px;">Roditelji</th>
+              <th style="padding: 10px 12px;">Supružnik</th>
+              <th style="padding: 10px 12px; text-align: center;">Slike</th>
+            </tr>
+          </thead>
+          <tbody id="persons-table-body">
+            <!-- Dynamic rows -->
+          </tbody>
+        </table>
+        
+        <div class="persons-empty" id="persons-empty" style="display:none; padding: 40px; text-align: center;">
+          <svg viewBox="0 0 64 64" fill="none" style="width:48px;height:48px;margin:0 auto 10px;opacity:0.5;">
+            <circle cx="32" cy="22" r="10" stroke="currentColor" stroke-width="2"/>
+            <path d="M10 54c0-12 10-20 22-20s22 8 22 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <p style="font-weight:600;">Nema osoba koje odgovaraju zadanim filtrima.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════ POGLED: UVOZ/IZVOZ ══════════════════ -->
+    <!-- PPPPPPPPPPPPPPPPPP POGLED: KOMENTARI PPPPPPPPPPPPPPPPPP -->
+    <section id="view-comments" class="view">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Komentari Posjetitelja</h1>
+          <p class="view-subtitle" id="comments-count-subtitle">0 komentara u bazi</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding: var(--space-md); margin-bottom: var(--space-md);">
+        <div style="display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap;">
+          <div class="search-input-wrap" style="flex: 1; min-width: 250px; margin-bottom: 0;">
+            <svg viewBox="0 0 20 20" class="search-icon"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3" stroke-linecap="round"/></svg>
+            <input type="text" id="comments-search" class="search-input" placeholder="Pretra~i komentare (sadr~aj, autor)..." aria-label="Pretra~i komentare">
+          </div>
+        </div>
+      </div>
+
+      <div class="comments-dashboard-list" id="comments-dashboard-list" style="display: flex; flex-direction: column; gap: var(--space-md);">
+        <!-- Komentari se uitavaju dinamiki -->
+      </div>
+    </section>
+
+    <section id="view-export" class="view">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Uvoz / Izvoz podataka</h1>
+          <p class="view-subtitle">Izvezite ili uvezite cjelokupnu bazu podataka</p>
+        </div>
+      </div>
+
+      <div class="export-grid">
+        <!-- Izvoz -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><path d="M12 3v12M8 11l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 17v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2" stroke-linecap="round"/></svg>
+            <h2 class="card-title">Izvoz baze</h2>
+          </div>
+          <p class="card-desc">Izvezite sve osobe, oznake i metapodatke slika.</p>
+          <div class="export-stats" id="export-stats">
+            <div class="stat"><span class="stat-value" id="stat-persons">0</span><span class="stat-label">Osoba</span></div>
+            <div class="stat"><span class="stat-value" id="stat-tags">0</span><span class="stat-label">Oznaka</span></div>
+            <div class="stat"><span class="stat-value" id="stat-images">0</span><span class="stat-label">Slika</span></div>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-outline btn-sm" id="btn-export-json">
+              <svg viewBox="0 0 20 20"><path d="M6 3h8l3 3v11H3V6l3-3z M6 3v5h8V3"/></svg>
+              Izvezi JSON
+            </button>
+            <button class="btn btn-outline btn-sm" id="btn-export-csv">
+              <svg viewBox="0 0 20 20"><path d="M4 4h12v12H4z M4 8h12 M4 12h12 M8 4v12"/></svg>
+              Izvezi CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Uvoz -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><path d="M12 15V3M8 7l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 17v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2" stroke-linecap="round"/></svg>
+            <h2 class="card-title">Uvoz baze</h2>
+          </div>
+          <p class="card-desc">Uvezite prethodno izvezenu bazu podataka. Odaberite način spajanja podataka.</p>
+          <div class="import-mode">
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="merge" checked id="import-merge">
+              <span class="radio-custom"></span>
+              Spoji s postojećim podacima
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="import-mode" value="replace" id="import-replace">
+              <span class="radio-custom"></span>
+              <span class="text-danger">Zamijeni sve podatke</span>
+            </label>
+          </div>
+          <div class="drop-zone" id="import-drop-zone" tabindex="0" role="button" aria-label="Povucite JSON ili CSV datoteku ovdje">
+            <svg viewBox="0 0 48 48" fill="none">
+              <path d="M24 10v20M16 22l8-8 8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 36h32" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <p>Povucite JSON datoteku ovdje</p>
+            <p class="text-muted">ili</p>
+            <button class="btn btn-outline btn-sm" id="btn-browse-import">Odaberite datoteku</button>
+            <input type="file" id="import-file-input" accept=".json,.csv" style="display:none">
+          </div>
+        </div>
+
+        <!-- Uvoz GEDCOM -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <h2 class="card-title">GEDCOM uvoz osoba (.ged)</h2>
+          </div>
+          <p class="card-desc">Uvezite popis osoba iz rodoslovne GEDCOM datoteke (.ged) ili učitajte testne podatke za primjer.</p>
+          <div class="form-group" style="display: flex; gap: 10px;">
+            <input type="file" id="gedcom-file-input" accept=".ged,.gedcom" style="display:none">
+            <button class="btn btn-primary btn-sm" id="btn-browse-gedcom">
+              Odaberi GEDCOM datoteku
+            </button>
+            <button class="btn btn-outline btn-sm" id="btn-load-demo-gedcom" style="border-color: var(--primary-color); color: var(--primary-color);">
+              Učitaj testne podatke
+            </button>
+          </div>
+        </div>
+
+        <!-- Sinkronizacija -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><path d="M4 12a8 8 0 0 1 14.9-3.9M4 12H1l3-3 3 3 M20 12a8 8 0 0 1-14.9 3.9M20 12h3l-3 3-3-3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h2 class="card-title">Firestore sinkronizacija</h2>
+          </div>
+          <div class="sync-status" id="sync-status">
+            <div class="sync-indicator" id="sync-indicator"></div>
+            <span id="sync-status-text">Provjera...</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-outline btn-sm" id="btn-force-sync">
+              <svg viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 1 1.8 4.3M4 14V10H8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Sinkroniziraj sada
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════ POGLED: POSTAVKE ══════════════════ -->
+    <section id="view-settings" class="view">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Postavke</h1>
+          <p class="view-subtitle">Konfiguracija Google Drive-a i aplikacije</p>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+
+        <!-- Google Drive -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon" fill="none">
+              <path d="M22 15.8L15.2 4H8.8L2 15.8l3.2 4.2h13.6L22 15.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M2 15.8h20M8.8 4l6.2 11.8M15.2 4L9 15.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <h2 class="card-title">Google Drive</h2>
+          </div>
+
+          <div class="drive-auth-section" id="drive-auth-section">
+            <!-- Prikazuje se dinamički -->
+          </div>
+
+          <div class="form-group" id="drive-folder-section" style="display:none;">
+            <label class="form-label">Ulazna mapa (izvor fotografija)</label>
+            <div class="folder-picker" id="input-folder-picker">
+              <span class="folder-name" id="input-folder-name">Nije odabrana</span>
+              <button class="btn btn-outline btn-xs" id="btn-pick-input-folder">Odaberi</button>
+            </div>
+
+            <label class="form-label mt-md">Izlazna mapa (obrađene slike)</label>
+            <div class="folder-picker" id="output-folder-picker">
+              <span class="folder-name" id="output-folder-name">Nije odabrana</span>
+              <button class="btn btn-outline btn-xs" id="btn-pick-output-folder">Odaberi</button>
+            </div>
+
+            <label class="form-label mt-md">Naziv podmape za portrete</label>
+            <input type="text" class="form-input" id="portraits-subfolder-name" value="Portreti" placeholder="npr. Portreti">
+            <p class="form-hint">Podmapa će se kreirati unutar Izlazne mape.</p>
+
+            <label class="form-label mt-md">Polazišna mapa za odabir (URL ili ID)</label>
+            <input type="text" class="form-input" id="default-start-folder" placeholder="Unesite ID ili URL mape">
+            <p class="form-hint">Od ove mape će kretati pretraživanje prilikom odabira ulazne/izlazne mape.</p>
+          </div>
+        </div>
+
+        <!-- Credentials (opcionalno) -->
+        <div class="card" id="credentials-card" style="display:none;">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><circle cx="12" cy="11" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M12 15v5M10 18h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="2" y="9" width="20" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>
+            <h2 class="card-title">Google Credentials</h2>
+          </div>
+          <p class="card-desc">Zalijepite sadržaj credentials.json datoteke (opcionalno, za provjeru).</p>
+          <textarea class="form-textarea" id="credentials-input" rows="5" placeholder='{"web": {"client_id": "...", "client_secret": "..."}}'></textarea>
+          <button class="btn btn-outline btn-sm mt-sm" id="btn-validate-credentials">Provjeri</button>
+        </div>
+
+        <!-- Opće postavke -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.5"/></svg>
+            <h2 class="card-title">Opće postavke</h2>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Kvaliteta JPEG kompresije portreta</label>
+            <div class="slider-wrap">
+              <input type="range" class="slider" id="jpeg-quality" min="70" max="100" value="92">
+              <span class="slider-value" id="jpeg-quality-val">92%</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="toggle-label">
+              <input type="checkbox" id="toggle-show-labels" checked>
+              <span class="toggle-switch"></span>
+              Prikaži oznake (ime/prezime) na platnu
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="toggle-label">
+              <input type="checkbox" id="toggle-auto-sync" checked>
+              <span class="toggle-switch"></span>
+              Automatska Firestore sinkronizacija
+            </label>
+          </div>
+          <button class="btn btn-primary btn-sm mt-md" id="btn-save-settings">Spremi postavke</button>
+        </div>
+
+        <!-- Tipkovnički prečaci -->
+        <div class="card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon"><rect x="2" y="6" width="20" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M8 14h8M18 14h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <h2 class="card-title">Tipkovnički prečaci</h2>
+          </div>
+          <div class="shortcuts-list">
+            <div class="shortcut"><kbd>Ctrl</kbd>+<kbd>S</kbd><span>Spremi sliku i oznake</span></div>
+            <div class="shortcut"><kbd>Delete</kbd><span>Obriši odabranu oznaku</span></div>
+            <div class="shortcut"><kbd>Esc</kbd><span>Odustani / Zatvori formu</span></div>
+            <div class="shortcut"><kbd>+</kbd> / <kbd>-</kbd><span>Povećaj / Umanji</span></div>
+            <div class="shortcut"><kbd>F</kbd><span>Prilagodi sliku prozoru</span></div>
+            <div class="shortcut"><kbd>D</kbd><span>Način označavanja</span></div>
+            <div class="shortcut"><kbd>P</kbd><span>Način pomicanja</span></div>
+            <div class="shortcut"><kbd>↑ ↓ ← →</kbd><span>Pomicanje po slici</span></div>
+            <div class="shortcut"><kbd>Tab</kbd><span>Sljedeća oznaka</span></div>
+            <div class="shortcut"><kbd>Shift</kbd>+<kbd>Tab</kbd><span>Prethodna oznaka</span></div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── STATUS BAR ────────────────────────────────────────────────────────── -->
+  <div class="status-bar" id="status-bar">
+    <div class="status-left">
+      <div class="sync-dot" id="status-sync-dot" title="Firestore sinkronizacija"></div>
+      <span id="status-sync-label">Nije spojeno</span>
+    </div>
+    <div class="status-right">
+      <span id="status-image-info"></span>
+      <span class="status-sep" id="status-sep" style="display:none;">|</span>
+      <span id="status-cursor-pos"></span>
+    </div>
+  </div>
+
+</div><!-- /#app -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODALI
+════════════════════════════════════════════════════════════════════════════ -->
+
+<!-- Modal: Prijava administratora -->
+<div class="modal-overlay" id="modal-admin-auth" role="dialog" aria-modal="true" aria-labelledby="modal-admin-title" style="display:none;">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-admin-title">🔒 Prijava Administratora</h2>
+      <button class="modal-close" id="modal-admin-close" aria-label="Zatvori">
+        <svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body text-center" style="padding: 20px 15px;">
+      <img src="/thumbs/antunovac_znak.gif" alt="Logo" style="width: 102px; height: 102px; margin: 0 auto 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+      <p class="card-desc" style="margin-bottom: 15px; font-size: 0.85rem;">Prijavite se s Google račonom ili učitajte OAuth JSON za pristupe uređivanju, postavkama i Google Drive-u.</p>
+      
+      <button class="btn btn-primary btn-full mb-md" id="modal-btn-connect-google">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" style="width:16px;height:16px;display:inline;margin-right:6px;"><path d="M18 13.8L12.6 4H7.4L2 13.8l2.6 3.4h10.8L18 13.8z"/><path d="M2 13.8h16M7.4 4l4.8 9.8M12.6 4L7.8 13.8"/></svg>
+        Poveži Google Drive
+      </button>
+      
+      <div style="margin: 10px 0; font-size: 0.75rem; color: var(--text-muted);">ILI UČITAJTE OAUTH JSON</div>
+      
+      <input type="file" id="modal-oauth-upload" accept=".json,application/json" style="display: none;">
+      <button class="btn btn-outline btn-sm btn-full mb-md" id="modal-btn-upload-oauth">
+        Odaberi client_secret.json
+      </button>
+
+      <div class="form-divider" style="margin: 15px 0;"><span>brzi testni način</span></div>
+
+      <button class="btn btn-ghost btn-xs btn-full" id="modal-btn-quick-admin">
+        ⚡ Omogući Admin način (Bez Drive-a)
+      </button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="modal-admin-cancel">Zatvori</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Forma za označavanje osobe -->
+<div class="modal-overlay" id="modal-tag" role="dialog" aria-modal="true" aria-labelledby="modal-tag-title" style="display:none;">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-tag-title">Označavanje osobe</h2>
+      <button class="modal-close" id="modal-tag-close" aria-label="Zatvori">
+        <svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Autocomplete pretraga -->
+      <div class="autocomplete-wrap">
+        <label class="form-label">Brza pretraga postojeće osobe</label>
+        <div class="autocomplete-input-wrap">
+          <svg viewBox="0 0 20 20" class="search-icon"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3" stroke-linecap="round"/></svg>
+          <input type="text" class="form-input" id="tag-autocomplete" placeholder="Upišite ime ili prezime..." autocomplete="off">
+          <div class="autocomplete-dropdown" id="tag-autocomplete-dropdown" style="display:none;"></div>
+        </div>
+      </div>
+      <div class="form-divider"><span>ili upišite ručno</span></div>
+      <!-- Forma -->
+      <form id="tag-form" novalidate>
+        <input type="hidden" id="tag-id">
+        <input type="hidden" id="tag-person-id">
+        <div class="form-grid-2" id="tag-admin-hidden-fields" style="display:none;">
+          <div class="form-group">
+            <label class="form-label required" for="tag-ime">Ime</label>
+            <input type="text" class="form-input" id="tag-ime" required placeholder="npr. Stjepan">
+          </div>
+          <div class="form-group">
+            <label class="form-label required" for="tag-prezime">Prezime</label>
+            <input type="text" class="form-input" id="tag-prezime" required placeholder="npr. Hap">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="tag-djevojacko">Djevojačko prezime</label>
+            <input type="text" class="form-input" id="tag-djevojacko" placeholder="npr. Kolar">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="tag-god-rod">Godina rođenja</label>
+            <input type="number" class="form-input" id="tag-god-rod" placeholder="npr. 1882" min="1700" max="2010">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="tag-god-sm">Godina smrti</label>
+            <input type="number" class="form-input" id="tag-god-sm" placeholder="npr. 1951" min="1700" max="2030">
+          </div>
+          <div class="form-group form-group-full">
+            <label class="form-label" for="tag-napomena">Napomena</label>
+            <textarea class="form-textarea" id="tag-napomena" rows="2" placeholder="Slobodan tekst o osobi..."></textarea>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="btn-tag-cancel">Odustani (Esc)</button>
+      <button class="btn btn-outline btn-sm" id="btn-tag-delete" style="display:none;" title="Obriši oznaku">
+        <svg viewBox="0 0 20 20"><path d="M5 7h10l-1 9H6L5 7z M3 7h14 M8 7V4h4v3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Obriši
+      </button>
+      <button class="btn btn-primary" id="btn-tag-save">Spremi oznaku</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Biranje Drive mape -->
+<div class="modal-overlay" id="modal-folder-picker" role="dialog" aria-modal="true" aria-labelledby="modal-folder-title" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-folder-title">Odaberi mapu</h2>
+      <button class="modal-close" id="modal-folder-close" aria-label="Zatvori">
+        <svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Breadcrumb -->
+      <div class="folder-breadcrumb" id="folder-breadcrumb"></div>
+      <!-- Popis mapa -->
+      <div class="folder-list" id="folder-list">
+        <div class="folder-list-loading" id="folder-list-loading">
+          <div class="spinner"></div> Učitavanje mapa...
+        </div>
+      </div>
+      <div class="folder-url-input">
+        <label class="form-label">Ili unesite Drive URL / ID mape</label>
+        <div class="input-btn-row">
+          <input type="text" class="form-input" id="folder-url-input" placeholder="https://drive.google.com/drive/folders/...">
+          <button class="btn btn-outline btn-sm" id="btn-resolve-folder-url">Provjeri</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="btn-folder-cancel">Odustani</button>
+      <button class="btn btn-primary" id="btn-folder-select" disabled>Odaberi ovu mapu</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Potvrda brisanja -->
+<div class="modal-overlay" id="modal-confirm" role="dialog" aria-modal="true" style="display:none;">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-confirm-title">Potvrda</h2>
+    </div>
+    <div class="modal-body">
+      <p id="modal-confirm-msg"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="btn-confirm-cancel">Odustani</button>
+      <button class="btn btn-danger" id="btn-confirm-ok">Potvrdi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Osoba detalji / edit -->
+<div class="modal-overlay" id="modal-person" role="dialog" aria-modal="true" aria-labelledby="modal-person-title" style="display:none;">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-person-title">Podaci o osobi</h2>
+      <button class="modal-close" id="modal-person-close" aria-label="Zatvori">
+        <svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="person-gedcom-notice" style="display:none; margin-bottom: 15px; padding: 10px 14px; background: rgba(245,166,35,0.15); border: 1px solid rgba(245,166,35,0.3); border-radius: 6px; font-size: 0.85rem; color: var(--warning); font-weight: 500;">
+        🔒 Ovaj podatak je uvezen iz GEDCOM-a i trajno je zaštićen. Nije ga moguće mijenjati niti brisati.
+      </div>
+      <form id="person-form" novalidate>
+        <input type="hidden" id="person-id">
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required" for="person-ime">Ime</label>
+            <input type="text" class="form-input" id="person-ime" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label required" for="person-prezime">Prezime</label>
+            <input type="text" class="form-input" id="person-prezime" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="person-djevojacko">Djevojačko prezime</label>
+            <input type="text" class="form-input" id="person-djevojacko">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="person-god-rod">Godina rođenja</label>
+            <input type="number" class="form-input" id="person-god-rod" min="1700" max="2010">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="person-god-sm">Godina smrti</label>
+            <input type="number" class="form-input" id="person-god-sm" min="1700" max="2030">
+          </div>
+          <div class="form-group form-group-full">
+            <label class="form-label" for="person-napomena">Napomena</label>
+            <textarea class="form-textarea" id="person-napomena" rows="3"></textarea>
+          </div>
+        </div>
+      </form>
+      <!-- Fotografije ove osobe -->
+      <div class="person-photos" id="person-photos">
+        <h3 class="section-subtitle">Fotografije ove osobe (<span id="person-photo-count">0</span>)</h3>
+        <div class="person-photos-grid" id="person-photos-grid"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="btn-person-cancel">Odustani</button>
+      <button class="btn btn-danger btn-sm" id="btn-person-delete">
+        <svg viewBox="0 0 20 20"><path d="M5 7h10l-1 9H6L5 7z M3 7h14 M8 7V4h4v3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Obriši osobu
+      </button>
+      <button class="btn btn-primary" id="btn-person-save">Spremi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── TOAST OBAVIJESTI ───────────────────────────────────────────────────── -->
+<div class="toast-container" id="toast-container" role="status" aria-live="polite"></div>
+
+<!-- ─── LOADING OVERLAY ───────────────────────────────────────────────────── -->
+<div class="loading-overlay" id="loading-overlay" style="display:none;">
+  <div class="loading-content">
+    <img src="/thumbs/antunovac_znak.gif" alt="Učitavanje..." class="loading-logo-img">
+    <div class="spinner spinner-lg"></div>
+    <p id="loading-msg">Učitavanje...</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT – redoslijed učitavanja je važan
+════════════════════════════════════════════════════════════════════════════ -->
+<script src="/js/ui.js"></script>
+<script src="/js/db.js"></script>
+<script src="/js/drive.js"></script>
+<script src="/js/canvas.js"></script>
+<script src="/js/gedcom.js"></script>
+<script src="/js/persons.js"></script>
+<script src="/js/tags.js"></script>
+<script src="/js/comments.js"></script>
+<script src="/js/export.js"></script>
+<script src="/js/keyboard.js"></script>
+<script src="/js/app.js"></script>
+
+</body>
+</html>
