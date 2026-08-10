@@ -16,6 +16,9 @@ const driveRoutes = require('./routes/drive');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Povjerenje prema reverse proxyju (Render/Koyeb) za ispravno slanje secure cookieja preko HTTPS-a
+app.set('trust proxy', 1);
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: '50mb' }));
@@ -32,7 +35,7 @@ app.use(cookieSession({
   maxAge: 30 * 24 * 60 * 60 * 1000, // 30 dana
   secure: process.env.NODE_ENV === 'production',
   httpOnly: true,
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  sameSite: 'lax',
   overwrite: true
 }));
 
