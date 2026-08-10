@@ -74,15 +74,16 @@ router.get('/callback', async (req, res) => {
     // ─── DEFINICIJA ADMINISTRATORSKE E-MAIL ADRESE ────────────────────────────
     // Administratorska e-mail adresa se čita iz .env datoteke (ADMIN_EMAIL)
     // ili koristi zadani fallback e-mail ispod.
-    const adminEmail = (process.env.ADMIN_EMAIL || 'tomica.hap@gmail.com').toLowerCase();
+    const adminEmailsEnv = process.env.ADMIN_EMAIL || 'tomica.hap@gmail.com,tomicahap@gmail.com';
+    const adminEmails = adminEmailsEnv.toLowerCase().split(',').map(e => e.trim());
     const userEmail = (userInfo.data.email || '').toLowerCase();
 
-    if (userEmail === adminEmail) {
+    if (adminEmails.includes(userEmail)) {
       req.session.isAdminSession = true;
       console.log(`[Auth] Uspješna autorizacija administratora: ${userEmail}`);
     } else {
       req.session.isAdminSession = false;
-      console.warn(`[Auth] Korisnik ${userEmail} je prijavljen, ali nema admin privilegije (očekivano: ${adminEmail}).`);
+      console.warn(`[Auth] Korisnik ${userEmail} je prijavljen, ali nema admin privilegije (očekivano: ${adminEmails.join(', ')}).`);
       // Vrati poruku o ograničenom pristupu
       return res.redirect('/?auth_success=1&warning=no_admin');
     }
