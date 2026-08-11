@@ -119,7 +119,8 @@ const DB = (function () {
     persons: [],
     tags: [],
     images: [],
-    comments: []
+    comments: [],
+    settings: {}
   };
 
   async function loadFromStorage() {
@@ -127,6 +128,7 @@ const DB = (function () {
     _data.tags     = (await idbGet(KEYS.tags)) || lsGet(KEYS.tags) || [];
     _data.images   = (await idbGet(KEYS.images)) || lsGet(KEYS.images) || [];
     _data.comments = (await idbGet(KEYS.comments)) || lsGet(KEYS.comments) || [];
+    _data.settings = (await idbGet(KEYS.settings)) || lsGet(KEYS.settings) || {};
   }
 
   let _saveTimeout = null;
@@ -602,17 +604,23 @@ const DB = (function () {
   }
 
   // ─── Postavke ──────────────────────────────────────────────────────────────
+  const DEFAULT_SETTINGS = {
+    jpegQuality: 92,
+    showLabels: true,
+    autoSync: true,
+    inputFolderId: null,
+    inputFolderName: null,
+    portraitsTisakFolderId: null,
+    portraitsTisakFolderName: null,
+    portraitsWebFolderId: null,
+    portraitsWebFolderName: null,
+    portraitsSubfolder: 'Portreti',
+    defaultStartFolder: 'root'
+  };
+
   function getSettings() {
-    return lsGet(KEYS.settings) || {
-      jpegQuality: 92,
-      showLabels: true,
-      autoSync: true,
-      inputFolderId: null,
-      inputFolderName: null,
-      outputFolderId: null,
-      outputFolderName: null,
-      portraitsSubfolder: 'Portreti'
-    };
+    const stored = _data.settings && Object.keys(_data.settings).length > 0 ? _data.settings : (lsGet(KEYS.settings) || {});
+    return { ...DEFAULT_SETTINGS, ...stored };
   }
 
   function saveSettings(settings) {
@@ -657,7 +665,8 @@ const DB = (function () {
           _data.tags = remoteData.tags || [];
           _data.images = remoteData.images || [];
           _data.comments = remoteData.comments || [];
-          _data.settings = remoteData.settings || {};
+          const localSettings = lsGet(KEYS.settings) || {};
+          _data.settings = { ...localSettings, ...(remoteData.settings || {}) };
 
           await idbSet(KEYS.persons, _data.persons);
           await idbSet(KEYS.tags, _data.tags);

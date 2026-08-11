@@ -1107,26 +1107,34 @@ const App = (function () {
     if (!settings) return;
     const jpegQualityEl = document.getElementById('jpeg-quality');
     if (jpegQualityEl) jpegQualityEl.value = settings.jpegQuality || 92;
-    document.getElementById('jpeg-quality-val')?.textContent && (document.getElementById('jpeg-quality-val').textContent = (settings.jpegQuality || 92) + '%');
+    
+    const jpegValEl = document.getElementById('jpeg-quality-val');
+    if (jpegValEl) jpegValEl.textContent = (settings.jpegQuality || 92) + '%';
 
     const showLabelsEl = document.getElementById('toggle-show-labels');
     if (showLabelsEl) showLabelsEl.checked = settings.showLabels !== false;
     CanvasEngine.showLabels = settings.showLabels !== false;
 
-    document.getElementById('toggle-auto-sync').checked = settings.autoSync !== false;
+    const autoSyncEl = document.getElementById('toggle-auto-sync');
+    if (autoSyncEl) autoSyncEl.checked = settings.autoSync !== false;
 
     const inputName = settings.inputFolderName || 'Nije odabrana';
     const tisakName = settings.portraitsTisakFolderName || 'Nije odabrana';
     const webName = settings.portraitsWebFolderName || 'Nije odabrana';
-    document.getElementById('input-folder-name').textContent = inputName;
+    
+    const inputNameEl = document.getElementById('input-folder-name');
+    if (inputNameEl) inputNameEl.textContent = inputName;
+    
     const tEl = document.getElementById('tisak-folder-name');
     if (tEl) tEl.textContent = tisakName;
+    
     const wEl = document.getElementById('web-folder-name');
     if (wEl) wEl.textContent = webName;
 
     const defaultStartFolder = settings.defaultStartFolder || 'root';
-    if (document.getElementById('default-start-folder')) {
-      document.getElementById('default-start-folder').value = defaultStartFolder;
+    const defaultStartFolderEl = document.getElementById('default-start-folder');
+    if (defaultStartFolderEl) {
+      defaultStartFolderEl.value = defaultStartFolder;
     }
 
     const gallerySubtitle = document.getElementById('gallery-folder-name');
