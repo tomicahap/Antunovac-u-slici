@@ -93,6 +93,7 @@ const App = (function () {
       }
     } catch (err) {
       console.error('[App] Init greška:', err);
+      alert('Kritična greška pri pokretanju aplikacije:\n' + err.message + '\n\nMolim javite ovu grešku programeru.');
     } finally {
       hideSplash();
     }
@@ -707,7 +708,7 @@ const App = (function () {
     _folderPickerSelectedId = null;
     
     const settings = DB.getSettings();
-    const startFolderId = settings.defaultStartFolder || '1_Qrk0ah9pNDZ4rXID4R-mEY6BJ6UpdS3';
+    const startFolderId = settings.defaultStartFolder || 'root';
     
     _folderPickerBreadcrumb = [{ id: startFolderId, name: startFolderId === 'root' ? 'Moj Drive' : 'Polazišna mapa' }];
     
@@ -903,7 +904,7 @@ const App = (function () {
     document.getElementById('input-folder-name').textContent = inputName;
     document.getElementById('output-folder-name').textContent = outputName;
 
-    const defaultStartFolder = settings.defaultStartFolder || '1_Qrk0ah9pNDZ4rXID4R-mEY6BJ6UpdS3';
+    const defaultStartFolder = settings.defaultStartFolder || 'root';
     if (document.getElementById('default-start-folder')) {
       document.getElementById('default-start-folder').value = defaultStartFolder;
     }
@@ -913,7 +914,7 @@ const App = (function () {
   }
 
   function saveSettings() {
-    let startFolderRaw = document.getElementById('default-start-folder')?.value.trim() || '1_Qrk0ah9pNDZ4rXID4R-mEY6BJ6UpdS3';
+    let startFolderRaw = document.getElementById('default-start-folder')?.value.trim() || 'root';
     // Ekstrahiraj ID ako je proslijeđen URL
     let startFolderId = startFolderRaw;
     const match = startFolderRaw.match(/folders\/([a-zA-Z0-9-_]+)/);

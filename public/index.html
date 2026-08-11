@@ -17,6 +17,17 @@
 
   <!-- Application CSS -->
   <link rel="stylesheet" href="/css/style.css">
+
+  <!-- Global Error Logger for Production Debugging -->
+  <script>
+    window.addEventListener('error', function (e) {
+      const errorMsg = e.message + '\nFile: ' + e.filename + '\nLine: ' + e.lineno + ':' + e.colno;
+      alert('JavaScript error:\n' + errorMsg);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      alert('Promise rejection:\n' + (e.reason ? (e.reason.message || e.reason) : 'Unknown reason'));
+    });
+  </script>
 </head>
 <body>
 
