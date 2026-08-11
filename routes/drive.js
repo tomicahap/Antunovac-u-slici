@@ -10,6 +10,11 @@ const multer = require('multer');
 const { getDriveClient, getAuthenticatedClient } = require('../utils/driveClient');
 const { isTiff, tiffToJpeg } = require('../utils/tiffConverter');
 const firebaseDb = require('../utils/firebase');
+const sharp = require('sharp');
+
+// Ograničavanje memorije za sharp (Render 512MB RAM OOM zaštita)
+sharp.cache(false);
+sharp.concurrency(1);
 
 // Multer za upload u memoriji (ne na disk)
 const upload = multer({
@@ -278,12 +283,19 @@ router.get('/file/:id/thumbnail', async (req, res) => {
 });
 
 // ─── POST /api/drive/file/:id/crop ──────────────────────────────────────
-// Izrezivanje (crop) originalne slike na serveru (čuva TIFF kvalitetu)
+// Izrezivanje (crop) originalne slike na serveru (čuva TIFF kvalitetu) - OOM optimizirano
 router.post('/file/:id/crop', express.json(), async (req, res) => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const { pipeline } = require('stream/promises');
+
+  const { id } = req.params;
+  const { x, y, width, height } = req.body;
+  const tempFilePath = path.join(os.tmpdir(), `crop_download_${id}_${Date.now()}`);
+
   try {
     const drive = await getDriveClient(req.session);
-    const { id } = req.params;
-    const { x, y, width, height } = req.body;
 
     // Dohvati metapodatke o datoteci radi točnog formata (mimeType)
     const fileMetadata = await drive.files.get({
@@ -291,104 +303,99 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
       fields: 'name, mimeType'
     });
     const originalMimeType = fileMetadata.data.mimeType || 'image/jpeg';
-    console.log(`[Crop] Datoteka: ${fileMetadata.data.name}, originalni MIME tip: ${originalMimeType}`);
+    console.log(`[Crop] Preuzimanje originala u privremenu datoteku: ${tempFilePath}`);
 
     const fileResponse = await drive.files.get(
       { fileId: id, alt: 'media' },
       { responseType: 'stream' }
     );
 
-    const chunks = [];
-    fileResponse.data.on('data', chunk => chunks.push(chunk));
-    fileResponse.data.on('end', async () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        let sharp;
-        try { sharp = require('sharp'); } catch(e) { throw new Error('Sharp nije instaliran.'); }
-        
-        // Bake orientation before cropping to align coordinate system
-        const rotatedBuffer = await sharp(buffer).rotate().toBuffer();
-        const img = sharp(rotatedBuffer);
-        const meta = await img.metadata();
-        
-        console.log(`[Crop] Originalna veličina slike: ${meta.width}x${meta.height}, format: ${meta.format}`);
-        
-        const px = Math.round((x / 100) * meta.width);
-        const py = Math.round((y / 100) * meta.height);
-        const pw = Math.round((width / 100) * meta.width);
-        const ph = Math.round((height / 100) * meta.height);
-        
-        const cropX = Math.max(0, px);
-        const cropY = Math.max(0, py);
-        const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
-        const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
+    const writeStream = fs.createWriteStream(tempFilePath);
+    await pipeline(fileResponse.data, writeStream);
 
-        console.log(`[Crop] Izrezivanje regije: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
+    console.log('[Crop] Preuzimanje dovršeno. Analiza metapodataka slike...');
+    const imgMetadataReader = sharp(tempFilePath);
+    const meta = await imgMetadataReader.metadata();
 
-        let processed = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
+    console.log(`[Crop] Originalna veličina slike: ${meta.width}x${meta.height}, format: ${meta.format}`);
 
-        if (originalMimeType && (originalMimeType.includes('tiff') || originalMimeType.includes('tif'))) {
-          processed = processed.tiff({
-            compression: 'none',
-            quality: 100,
-            xres: 300,
-            yres: 300
-          });
-        } else if (originalMimeType && originalMimeType.includes('png')) {
-          processed = processed.png({
-            compressionLevel: 0,
-            xres: 300,
-            yres: 300
-          });
-        } else if (originalMimeType && originalMimeType.includes('webp')) {
-          processed = processed.webp({
-            quality: 100,
-            lossless: true
-          });
-        } else {
-          processed = processed.jpeg({
-            quality: 100,
-            chromaSubsampling: '4:4:4',
-            xres: 300,
-            yres: 300
-          });
-        }
+    const px = Math.round((x / 100) * meta.width);
+    const py = Math.round((y / 100) * meta.height);
+    const pw = Math.round((width / 100) * meta.width);
+    const ph = Math.round((height / 100) * meta.height);
 
-        const outBuffer = await processed.toBuffer();
-        console.log(`[Crop] Izrezano uspješno, veličina izlaznog međuspremnika: ${outBuffer.length} bajtova`);
+    const cropX = Math.max(0, px);
+    const cropY = Math.max(0, py);
+    const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
+    const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
 
-        res.set({
-          'Content-Type': originalMimeType,
-          'Content-Length': outBuffer.length
-        });
-        res.send(outBuffer);
-      } catch (err) {
-        console.error('[Drive] Greška pri izrezivanju:', err);
-        res.status(500).json({ error: 'Greška pri izrezivanju: ' + err.message });
-      }
+    console.log(`[Crop] Izrezivanje regije: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
+
+    let processed = sharp(tempFilePath).rotate().extract({ left: cropX, top: cropY, width: cropW, height: cropH });
+
+    if (originalMimeType && (originalMimeType.includes('tiff') || originalMimeType.includes('tif'))) {
+      processed = processed.tiff({ compression: 'none', quality: 100 });
+    } else if (originalMimeType && originalMimeType.includes('png')) {
+      processed = processed.png({ compressionLevel: 0 });
+    } else if (originalMimeType && originalMimeType.includes('webp')) {
+      processed = processed.webp({ quality: 100, lossless: true });
+    } else {
+      processed = processed.jpeg({ quality: 100, chromaSubsampling: '4:4:4' });
+    }
+
+    res.set({
+      'Content-Type': originalMimeType
     });
-    fileResponse.data.on('error', err => {
-      res.status(500).json({ error: 'Greška pri preuzimanju za crop.' });
-    });
+
+    // Pipe the processed image directly to the express response object
+    await pipeline(processed, res);
+    console.log('[Crop] Izrezana slika uspješno poslana klijentu.');
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[Drive] Greška pri izrezivanju:', err);
+    res.status(500).json({ error: 'Greška pri izrezivanju: ' + err.message });
+  } finally {
+    if (fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+        console.log(`[Crop] Obrisana privremena datoteka: ${tempFilePath}`);
+      } catch (e) {
+        console.error('[Crop] Neuspješno brisanje privremene datoteke:', e.message);
+      }
+    }
+    // Prisilno oslobađanje memorije za Garbage Collector
+    if (global.gc) {
+      try {
+        global.gc();
+        console.log('[Crop] Garbage Collector uspješno pokrenut.');
+      } catch (e) {}
+    }
   }
 });
 
 // ─── POST /api/drive/file/:id/crop-and-upload ────────────────────────────
-// Izrezivanje i izravan prijenos na Google Drive s poslužitelja (bez slanja klijentu)
+// Izrezivanje i izravan prijenos na Google Drive s poslužitelja (bez slanja klijentu) - OOM optimizirano
 router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const { pipeline } = require('stream/promises');
+
+  const { id } = req.params;
+  const { x, y, width, height, folderId, filename, existingFileId, existingTisakFileId } = req.body;
+
+  const tisakFolderId = req.body.portraitsTisakFolderId || process.env.PORTRAITS_TISAK_FOLDER_ID || folderId;
+  const webFolderId = req.body.portraitsWebFolderId || process.env.PORTRAITS_WEB_FOLDER_ID || folderId;
+
+  if (!tisakFolderId || !webFolderId || !filename) {
+    return res.status(400).json({ error: 'Nedostaju identifikatori mapa ili naziv datoteke.' });
+  }
+
+  // Privremena datoteka na disku za preuzimanje originalne slike
+  const tempFilePath = path.join(os.tmpdir(), `crop_orig_${id}_${Date.now()}`);
+
   try {
     const drive = await getDriveClient(req.session);
-    const { id } = req.params;
-    const { x, y, width, height, folderId, filename, existingFileId, existingTisakFileId } = req.body;
-
-    const tisakFolderId = req.body.portraitsTisakFolderId || process.env.PORTRAITS_TISAK_FOLDER_ID || folderId;
-    const webFolderId = req.body.portraitsWebFolderId || process.env.PORTRAITS_WEB_FOLDER_ID || folderId;
-
-    if (!tisakFolderId || !webFolderId || !filename) {
-      return res.status(400).json({ error: 'Nedostaju identifikatori mapa ili naziv datoteke.' });
-    }
 
     // 1. Dohvati metapodatke o datoteci radi točnog formata (mimeType)
     const fileMetadata = await drive.files.get({
@@ -396,153 +403,155 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
       fields: 'name, mimeType'
     });
     const originalMimeType = fileMetadata.data.mimeType || 'image/jpeg';
-    console.log(`[CropAndUpload] Datoteka: ${fileMetadata.data.name}, originalni MIME tip: ${originalMimeType}`);
+    console.log(`[CropAndUpload] Preuzimanje originala u privremenu datoteku: ${tempFilePath}`);
 
-    // 2. Preuzmi medijski sadržaj
+    // 2. Preuzmi medijski sadržaj i upiši ga u privremenu datoteku na disk
     const fileResponse = await drive.files.get(
       { fileId: id, alt: 'media' },
       { responseType: 'stream' }
     );
 
-    const chunks = [];
-    fileResponse.data.on('data', chunk => chunks.push(chunk));
-    fileResponse.data.on('end', async () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        let sharp;
-        try { sharp = require('sharp'); } catch(e) { throw new Error('Sharp nije instaliran.'); }
-        
-        // Bake orientation before cropping to align coordinate system
-        const rotatedBuffer = await sharp(buffer).rotate().toBuffer();
-        const img = sharp(rotatedBuffer);
-        const meta = await img.metadata();
-        
-        console.log(`[CropAndUpload] Originalna veličina: ${meta.width}x${meta.height}, format: ${meta.format}`);
-        
-        const px = Math.round((x / 100) * meta.width);
-        const py = Math.round((y / 100) * meta.height);
-        const pw = Math.round((width / 100) * meta.width);
-        const ph = Math.round((height / 100) * meta.height);
-        
-        const cropX = Math.max(0, px);
-        const cropY = Math.max(0, py);
-        const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
-        const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
+    const writeStream = fs.createWriteStream(tempFilePath);
+    await pipeline(fileResponse.data, writeStream);
 
-        console.log(`[CropAndUpload] Rezanje: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
+    console.log('[CropAndUpload] Preuzimanje dovršeno. Analiza metapodataka slike...');
 
-        // ─── A. TISAK VERZIJA (Originalna rezolucija) ───
-        let processedTisak = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
+    // 3. Pročitaj dimenzije iz privremene datoteke bez učitavanja cijele slike u RAM
+    const imgMetadataReader = sharp(tempFilePath);
+    const meta = await imgMetadataReader.metadata();
 
-        if (originalMimeType.includes('tiff') || originalMimeType.includes('tif')) {
-          processedTisak = processedTisak.tiff({ compression: 'none', quality: 100 });
-        } else if (originalMimeType.includes('png')) {
-          processedTisak = processedTisak.png({ compressionLevel: 0 });
-        } else if (originalMimeType.includes('webp')) {
-          processedTisak = processedTisak.webp({ quality: 100, lossless: true });
-        } else {
-          processedTisak = processedTisak.jpeg({ quality: 100, chromaSubsampling: '4:4:4' });
-        }
-        const tisakBuffer = await processedTisak.toBuffer();
+    console.log(`[CropAndUpload] Originalna veličina: ${meta.width}x${meta.height}, format: ${meta.format}`);
 
-        // ─── B. WEB VERZIJA (Maksimalno 800px, komprimirana) ───
-        let webW = cropW;
-        let webH = cropH;
-        if (webW > 800 || webH > 800) {
-          if (webW > webH) {
-            webH = Math.round((800 / webW) * webH);
-            webW = 800;
-          } else {
-            webW = Math.round((800 / webH) * webW);
-            webH = 800;
-          }
-        }
-        
-        let processedWeb = sharp(rotatedBuffer)
-          .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
-          .resize(webW, webH)
-          .jpeg({ quality: 65, chromaSubsampling: '4:2:0' });
-        const webBuffer = await processedWeb.toBuffer();
+    const px = Math.round((x / 100) * meta.width);
+    const py = Math.round((y / 100) * meta.height);
+    const pw = Math.round((width / 100) * meta.width);
+    const ph = Math.round((height / 100) * meta.height);
 
-        console.log(`[CropAndUpload] Obrada završena. Tisak buffer: ${tisakBuffer.length} B, Web buffer: ${webBuffer.length} B.`);
+    const cropX = Math.max(0, px);
+    const cropY = Math.max(0, py);
+    const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
+    const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
 
-        // ─── C. PRIJENOS NA GOOGLE DRIVE ───
-        const { Readable } = require('stream');
+    console.log(`[CropAndUpload] Rezanje: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
 
-        // 1. Upload TISAK verzije
-        let tisakResponse;
-        if (existingTisakFileId) {
-          console.log(`[CropAndUpload] Ažuriranje postojećeg TISAK portreta: ${existingTisakFileId}`);
-          tisakResponse = await drive.files.update({
-            fileId: existingTisakFileId,
-            media: {
-              mimeType: originalMimeType,
-              body: Readable.from(tisakBuffer)
-            },
-            fields: 'id, name, webViewLink'
-          });
-        } else {
-          const finalFilenameTisak = await resolveFilenameConflict(drive, tisakFolderId, filename);
-          console.log(`[CropAndUpload] Kreiranje novog TISAK portreta: ${finalFilenameTisak} u mapi: ${tisakFolderId}`);
-          tisakResponse = await drive.files.create({
-            requestBody: {
-              name: finalFilenameTisak,
-              parents: [tisakFolderId]
-            },
-            media: {
-              mimeType: originalMimeType,
-              body: Readable.from(tisakBuffer)
-            },
-            fields: 'id, name, webViewLink'
-          });
-        }
+    // 4. Pripremi streams za prijenos (izbjegavanje držanja cijelog izlaza u RAM Bufferima)
+    // ─── A. TISAK VERZIJA (Originalna rezolucija) ───
+    let processedTisak = sharp(tempFilePath).rotate().extract({ left: cropX, top: cropY, width: cropW, height: cropH });
 
-        // 2. Upload WEB verzije
-        let webResponse;
-        if (existingFileId) {
-          console.log(`[CropAndUpload] Ažuriranje postojećeg WEB portreta: ${existingFileId}`);
-          webResponse = await drive.files.update({
-            fileId: existingFileId,
-            media: {
-              mimeType: 'image/jpeg',
-              body: Readable.from(webBuffer)
-            },
-            fields: 'id, name, webViewLink'
-          });
-        } else {
-          const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, filename);
-          console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${webFolderId}`);
-          webResponse = await drive.files.create({
-            requestBody: {
-              name: finalFilenameWeb,
-              parents: [webFolderId]
-            },
-            media: {
-              mimeType: 'image/jpeg',
-              body: Readable.from(webBuffer)
-            },
-            fields: 'id, name, webViewLink'
-          });
-        }
+    if (originalMimeType.includes('tiff') || originalMimeType.includes('tif')) {
+      processedTisak = processedTisak.tiff({ compression: 'none', quality: 100 });
+    } else if (originalMimeType.includes('png')) {
+      processedTisak = processedTisak.png({ compressionLevel: 0 });
+    } else if (originalMimeType.includes('webp')) {
+      processedTisak = processedTisak.webp({ quality: 100, lossless: true });
+    } else {
+      processedTisak = processedTisak.jpeg({ quality: 100, chromaSubsampling: '4:4:4' });
+    }
 
-        res.json({
-          success: true,
-          fileId: webResponse.data.id,
-          filename: webResponse.data.name,
-          webViewLink: webResponse.data.webViewLink,
-          tisakFileId: tisakResponse.data.id,
-          tisakWebViewLink: tisakResponse.data.webViewLink
-        });
-      } catch (err) {
-        console.error('[CropAndUpload] Greška pri obradi/prijenosu:', err);
-        res.status(500).json({ error: 'Greška pri obradi/prijenosu: ' + err.message });
+    // ─── B. WEB VERZIJA (Maksimalno 800px, komprimirana) ───
+    let webW = cropW;
+    let webH = cropH;
+    if (webW > 800 || webH > 800) {
+      if (webW > webH) {
+        webH = Math.round((800 / webW) * webH);
+        webW = 800;
+      } else {
+        webW = Math.round((800 / webH) * webW);
+        webH = 800;
       }
+    }
+
+    const processedWeb = sharp(tempFilePath)
+      .rotate()
+      .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
+      .resize(webW, webH)
+      .jpeg({ quality: 65, chromaSubsampling: '4:2:0' });
+
+    // 5. Upload TISAK verzije izravno iz streama
+    let tisakResponse;
+    if (existingTisakFileId) {
+      console.log(`[CropAndUpload] Ažuriranje postojećeg TISAK portreta: ${existingTisakFileId}`);
+      tisakResponse = await drive.files.update({
+        fileId: existingTisakFileId,
+        media: {
+          mimeType: originalMimeType,
+          body: processedTisak
+        },
+        fields: 'id, name, webViewLink'
+      });
+    } else {
+      const finalFilenameTisak = await resolveFilenameConflict(drive, tisakFolderId, filename);
+      console.log(`[CropAndUpload] Kreiranje novog TISAK portreta: ${finalFilenameTisak} u mapi: ${tisakFolderId}`);
+      tisakResponse = await drive.files.create({
+        requestBody: {
+          name: finalFilenameTisak,
+          parents: [tisakFolderId]
+        },
+        media: {
+          mimeType: originalMimeType,
+          body: processedTisak
+        },
+        fields: 'id, name, webViewLink'
+      });
+    }
+
+    // 6. Upload WEB verzije izravno iz streama
+    let webResponse;
+    if (existingFileId) {
+      console.log(`[CropAndUpload] Ažuriranje postojećeg WEB portreta: ${existingFileId}`);
+      webResponse = await drive.files.update({
+        fileId: existingFileId,
+        media: {
+          mimeType: 'image/jpeg',
+          body: processedWeb
+        },
+        fields: 'id, name, webViewLink'
+      });
+    } else {
+      const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, filename);
+      console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${webFolderId}`);
+      webResponse = await drive.files.create({
+        requestBody: {
+          name: finalFilenameWeb,
+          parents: [webFolderId]
+        },
+        media: {
+          mimeType: 'image/jpeg',
+          body: processedWeb
+        },
+        fields: 'id, name, webViewLink'
+      });
+    }
+
+    res.json({
+      success: true,
+      fileId: webResponse.data.id,
+      filename: webResponse.data.name,
+      webViewLink: webResponse.data.webViewLink,
+      tisakFileId: tisakResponse.data.id,
+      tisakWebViewLink: tisakResponse.data.webViewLink
     });
-    fileResponse.data.on('error', err => {
-      res.status(500).json({ error: 'Greška pri preuzimanju originala.' });
-    });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[CropAndUpload] Greška pri obradi/prijenosu:', err);
+    res.status(500).json({ error: 'Greška pri obradi/prijenosu: ' + err.message });
+  } finally {
+    // 7. Obavezno izbriši privremenu datoteku i oslobodi reference za GC
+    if (fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+        console.log(`[CropAndUpload] Obrisana privremena datoteka: ${tempFilePath}`);
+      } catch (e) {
+        console.error('[CropAndUpload] Neuspješno brisanje privremene datoteke:', e.message);
+      }
+    }
+    // Prisilno oslobađanje memorije za Garbage Collector
+    if (global.gc) {
+      try {
+        global.gc();
+        console.log('[CropAndUpload] Garbage Collector uspješno pokrenut.');
+      } catch (e) {}
+    }
   }
 });
 
