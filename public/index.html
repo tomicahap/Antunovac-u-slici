@@ -130,8 +130,8 @@
         
         <!-- Admin sub-filteri za fotografije -->
         <div class="gallery-subtabs" id="gallery-subtabs" style="display: none; gap: var(--space-xs); margin-left: 10px;">
-          <button class="btn btn-outline btn-xs active" data-subtab="untagged" id="subtab-gallery-untagged">Neoznaene</button>
-          <button class="btn btn-outline btn-xs" data-subtab="tagged" id="subtab-gallery-tagged">Oznaene</button>
+          <button class="btn btn-outline btn-xs active" data-subtab="untagged" id="subtab-gallery-untagged">Neoznačene</button>
+          <button class="btn btn-outline btn-xs" data-subtab="tagged" id="subtab-gallery-tagged">Označene</button>
           <button class="btn btn-outline btn-xs" data-subtab="all" id="subtab-gallery-all">Sve slike</button>
         </div>
         <div class="search-input-wrap" style="flex: 1; max-width: 300px;">
@@ -182,7 +182,7 @@
         </div>
         
         <div>
-          <button class="btn btn-primary btn-sm" id="btn-save-done" title="Zavrai oznaavanje ove slike" style="display: flex; align-items: center; gap: 6px;">
+          <button class="btn btn-primary btn-sm" id="btn-save-done" title="Završi označavanje ove slike" style="display: flex; align-items: center; gap: 6px;">
             <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M4 11l4 4 8-8" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
             GOTOVO
           </button>
@@ -222,10 +222,10 @@
           
           <!-- Prikaz slike (Canvas wrapper) -->
           <div class="canvas-wrapper" id="canvas-wrapper" style="flex: 1; min-height: 0; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
-            <canvas id="main-canvas" tabindex="0" aria-label="Platno za oznaavanje fotografija" style="max-width: 100%; max-height: 100%; object-fit: contain; background: #000; outline: none;"></canvas>
+            <canvas id="main-canvas" tabindex="0" aria-label="Platno za označavanje fotografija" style="max-width: 100%; max-height: 100%; object-fit: contain; background: #000; outline: none;"></canvas>
             <div class="canvas-crosshair" id="canvas-crosshair" style="position: absolute; pointer-events: none; display: none;"></div>
             <div class="canvas-overlay-msg" id="canvas-overlay-msg" style="position: absolute; pointer-events: none; text-align: center; color: var(--text-muted); font-size: 0.9rem;">
-              <p>Uitavanje fotografije...</p>
+              <p>Učitavanje fotografije...</p>
             </div>
           </div>
           
@@ -249,11 +249,11 @@
               </ul>
               <div class="tags-empty" id="tags-empty" style="text-align: center; padding: 24px; color: var(--text-muted);">
                 <svg viewBox="0 0 48 48" fill="none" width="32" height="32" style="margin: 0 auto 12px; display: block; opacity: 0.6;"><rect x="8" y="8" width="32" height="32" rx="3" stroke="currentColor" stroke-width="2" stroke-dasharray="4 2"/><path d="M18 24h12M24 18v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                <p style="font-size: 0.8rem; line-height: 1.4; margin: 0;">Nema oznaka.<br>Pritisnite "Dodaj okvir" da biste oznaili osobu.</p>
+                <p style="font-size: 0.8rem; line-height: 1.4; margin: 0;">Nema oznaka.<br>Pritisnite "Dodaj okvir" da biste označili osobu.</p>
               </div>
             </div>
             
-            <!-- PANEL ZA PRETRA}IVANJE I DETALJE (Prikazuje se kad je tag selektiran) - Dva stupca -->
+            <!-- PANEL ZA PRETRAŽIVANJE I DETALJE (Prikazuje se kad je tag selektiran) - Dva stupca -->
             <div id="sidebar-person-selector" style="display: none; flex-direction: row; gap: 16px; flex: 1; min-height: 0; align-items: stretch;">
               
               <!-- STUPAC 1 (Desni dio splitscreen-a ali s lijeve strane): Za odabir osobe kada se povezuje sa okvirom -->
@@ -276,7 +276,7 @@
                   
                   <!-- Rezultati pretrage (Inline autocomplete dropdown) -->
                   <div class="autocomplete-dropdown" id="sidebar-autocomplete-dropdown" style="display: block; position: static !important; max-height: 200px; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 4px;">
-                    <div style="padding: 10px; font-size: 0.8rem; color: var(--text-muted); text-align: center;">Ponite upisivati za pretragu...</div>
+                    <div style="padding: 10px; font-size: 0.8rem; color: var(--text-muted); text-align: center;">Počnite upisivati za pretragu...</div>
                   </div>
                 </div>
                 
@@ -291,7 +291,7 @@
 
               </div>
               
-              <!-- STUPAC 2: Live Preview & Osoba info (ime i prezime, godine roenja i smrti, ime supru~nika i imena roditelja) -->
+              <!-- STUPAC 2: Live Preview & Osoba info (ime i prezime, godine rođenja i smrti, ime supružnika i imena roditelja) -->
               <div class="sidebar-selector-col-right" style="width: 50%; display: flex; flex-direction: column; gap: 12px; min-height: 0;">
                 
                 <div class="tag-person-profile-card" style="display: flex; flex-direction: column; gap: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; flex: 1; overflow-y: auto; min-height: 0;">
@@ -447,7 +447,7 @@
         <div style="display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap;">
           <div class="search-input-wrap" style="flex: 1; min-width: 250px; margin-bottom: 0;">
             <svg viewBox="0 0 20 20" class="search-icon"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3" stroke-linecap="round"/></svg>
-            <input type="text" id="comments-search" class="search-input" placeholder="Pretra~i komentare (sadr~aj, autor)..." aria-label="Pretra~i komentare">
+            <input type="text" id="comments-search" class="search-input" placeholder="Pretraži komentare (sadržaj, autor)..." aria-label="Pretraži komentare">
           </div>
         </div>
       </div>
