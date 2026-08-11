@@ -81,6 +81,30 @@ router.get('/callback', async (req, res) => {
     if (adminEmails.includes(userEmail)) {
       req.session.isAdminSession = true;
       console.log(`[Auth] Uspješna autorizacija administratora: ${userEmail}`);
+      
+      // Spremi globalni admin session za posjetitelje
+      global.adminSession = {
+        encryptedRefreshToken: req.session.encryptedRefreshToken,
+        accessToken: req.session.accessToken,
+        tokenExpiry: req.session.tokenExpiry,
+        userEmail: req.session.userEmail,
+        userName: req.session.userName,
+        userPicture: req.session.userPicture
+      };
+
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const dataDir = path.join(__dirname, '..', 'data');
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dataDir, 'admin_session.json'),
+          JSON.stringify(global.adminSession, null, 2)
+        );
+        console.log('[Auth] Admin sesija spremljena na disk za posjetitelje.');
+      } catch (e) {
+        console.error('[Auth] Greška pri spremanju admin sesije na disk:', e.message);
+      }
     } else {
       req.session.isAdminSession = false;
       console.warn(`[Auth] Korisnik ${userEmail} je prijavljen, ali nema admin privilegije (očekivano: ${adminEmails.join(', ')}).`);
@@ -99,7 +123,7 @@ router.get('/callback', async (req, res) => {
 // Provjera je li korisnik autentificiran
 router.get('/status', (req, res) => {
   const isAdmin = !!(req.session && req.session.isAdminSession);
-  const isDriveConnected = !!(req.session && req.session.encryptedRefreshToken);
+  const isDriveConnected = !!(req.session && req.session.encryptedRefreshToken) || !!global.adminSession;
   res.json({
     authenticated: isAdmin,
     driveConnected: isDriveConnected,

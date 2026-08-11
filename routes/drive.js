@@ -58,6 +58,32 @@ router.get('/folders', async (req, res) => {
   }
 });
 
+// ─── POST /api/drive/file/:id/copy ───────────────────────────────────────────
+// Kopiranje slike u drugi folder sa novim imenom
+router.post('/file/:id/copy', express.json(), async (req, res) => {
+  try {
+    const originalDriveId = req.params.id;
+    const { outputFolderId, newFilename } = req.body;
+    if (!outputFolderId) return res.status(400).json({ error: 'Nedostaje outputFolderId.' });
+    if (!newFilename) return res.status(400).json({ error: 'Nedostaje newFilename.' });
+
+    const drive = await getDriveClient(req.session);
+    const response = await drive.files.copy({
+      fileId: originalDriveId,
+      requestBody: {
+        name: newFilename,
+        parents: [outputFolderId]
+      },
+      fields: 'id, name, webViewLink, thumbnailLink'
+    });
+
+    res.json({ success: true, file: response.data });
+  } catch (err) {
+    console.error('[Drive] Greška pri kopiranju datoteke:', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 // ─── GET /api/drive/files ────────────────────────────────────────────────────
 // Popis slika u zadanoj mapi
 router.get('/files', async (req, res) => {

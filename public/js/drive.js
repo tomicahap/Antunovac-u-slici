@@ -240,6 +240,10 @@ const DriveAPI = (function () {
     return request('GET', '/config');
   }
 
+  async function copyFile(fileId, outputFolderId, newFilename) {
+    return request('POST', `/drive/file/${fileId}/copy`, { outputFolderId, newFilename });
+  }
+
   // ─── Public API ─────────────────────────────────────────────────────────────
   return {
     // Auth
@@ -248,7 +252,7 @@ const DriveAPI = (function () {
     getFolders, resolveUrl, createFolder,
     // Datoteke
     getFiles, getFileMetadata, getImageUrl, getThumbnailUrl, getCdnUrl, downloadImage, deleteFile,
-    uploadFile, uploadBlob,
+    uploadFile, uploadBlob, copyFile,
     // Config
     getConfig
   };

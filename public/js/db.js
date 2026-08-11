@@ -414,7 +414,7 @@ const DB = (function () {
   function getAllImages() { return [..._data.images]; }
 
   function getImageByDriveId(driveId) {
-    return _data.images.find(img => img.original_drive_id === driveId) || null;
+    return _data.images.find(img => img.original_drive_id === driveId || img.output_drive_id === driveId) || null;
   }
 
   function saveImage(data) {

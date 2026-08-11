@@ -37,6 +37,20 @@ function createOAuth2Client(session) {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
+const fs = require('fs');
+const path = require('path');
+const sessionFile = path.join(__dirname, '..', 'data', 'admin_session.json');
+
+// Učitaj administratorsku sesiju s diska na startu servera
+if (fs.existsSync(sessionFile)) {
+  try {
+    global.adminSession = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+    console.log('[DriveClient] Uspješno učitana admin sesija s diska.');
+  } catch (err) {
+    console.error('[DriveClient] Greška pri čitanju admin sesije s diska:', err.message);
+  }
+}
+
 /**
  * Vraća autentificirani OAuth2 ili JWT (Service Account) klijent iz sesije.
  * Automatski osvježava access token ako je istekao.
@@ -70,31 +84,47 @@ async function getAuthenticatedClient(session) {
     return jwtClient;
   }
 
-  // 3. Standardni OAuth 2.0 flow
-  if (!session || !session.encryptedRefreshToken) {
+  // 3. Standardni OAuth 2.0 flow s fallbackom na admin session
+  let activeSession = session;
+  if ((!activeSession || !activeSession.encryptedRefreshToken) && global.adminSession) {
+    activeSession = global.adminSession;
+  }
+
+  if (!activeSession || !activeSession.encryptedRefreshToken) {
     throw Object.assign(new Error('Korisnik nije prijavljen. Molimo povežite Google Drive.'), { status: 401 });
   }
 
-  const refreshToken = decrypt(session.encryptedRefreshToken);
+  const refreshToken = decrypt(activeSession.encryptedRefreshToken);
   if (!refreshToken) {
     throw Object.assign(new Error('Nevažeća sesija. Molimo prijavite se ponovno.'), { status: 401 });
   }
 
-  const oauth2Client = createOAuth2Client(session);
+  const oauth2Client = createOAuth2Client(activeSession);
   oauth2Client.setCredentials({
     refresh_token: refreshToken,
-    access_token: session.accessToken || null,
-    expiry_date: session.tokenExpiry || null
+    access_token: activeSession.accessToken || null,
+    expiry_date: activeSession.tokenExpiry || null
   });
 
   // Ako je token istekao, osvježi ga
-  if (!session.accessToken || (session.tokenExpiry && Date.now() >= session.tokenExpiry - 60000)) {
+  if (!activeSession.accessToken || (activeSession.tokenExpiry && Date.now() >= activeSession.tokenExpiry - 60000)) {
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
       // Ažuriraj sesiju s novim access tokenom
-      session.accessToken = credentials.access_token;
-      session.tokenExpiry = credentials.expiry_date;
+      activeSession.accessToken = credentials.access_token;
+      activeSession.tokenExpiry = credentials.expiry_date;
       oauth2Client.setCredentials(credentials);
+
+      // Ako smo osvježili globalnu admin sesiju, spremi je na disk
+      if (activeSession === global.adminSession) {
+        try {
+          const dataDir = path.dirname(sessionFile);
+          if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+          fs.writeFileSync(sessionFile, JSON.stringify(global.adminSession, null, 2));
+        } catch (e) {
+          console.error('[DriveClient] Greška pri spremanju osvježenog tokena na disk:', e.message);
+        }
+      }
     } catch (err) {
       console.error('[Drive] Greška pri osvježavanju tokena:', err.message);
       throw Object.assign(new Error('Sesija je istekla. Molimo prijavite se ponovno.'), { status: 401 });

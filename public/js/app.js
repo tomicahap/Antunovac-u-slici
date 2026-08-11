@@ -323,14 +323,19 @@ const App = (function () {
   // ─── Galerija ─────────────────────────────────────────────────────────────
 
   async function loadGallery(folderId, append = false) {
-    // Ako Drive nije spojen, automatski dohvaćamo podatke iz lokalne baze
-    if (!_authStatus?.driveConnected) {
+    // Posjetitelji i offline način uvijek dohvaćaju obrađene podatke iz baze
+    if (_userRole === 'visitor' || !_authStatus?.driveConnected) {
        const images = DB.getAllImages();
-       _galleryFiles = images.map(img => ({
-         id: img.original_drive_id,
-         name: img.original_filename,
-         mimeType: 'image/jpeg'
-       }));
+       _galleryFiles = images
+         .filter(img => img.output_drive_id)
+         .map(img => {
+           const ext = img.original_filename.split('.').pop() || 'jpg';
+           return {
+             id: img.output_drive_id,
+             name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
+             mimeType: 'image/jpeg'
+           };
+         });
        renderCurrentGallery();
        return;
     }
@@ -422,23 +427,62 @@ const App = (function () {
     }
 
     // Fotografije
-    let filesToRender = _galleryFiles;
-    
+    let filesToRender = [];
+
+    if (_userRole === 'visitor') {
+      // Posjetitelji vide isključivo označene, kopirane slike iz baze
+      const images = DB.getAllImages();
+      filesToRender = images
+        .filter(img => img.output_drive_id && DB.getTagsByImageId(img.id).length > 0)
+        .map(img => {
+          const ext = img.original_filename.split('.').pop() || 'jpg';
+          return {
+            id: img.output_drive_id,
+            name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
+            mimeType: 'image/jpeg'
+          };
+        });
+    } else {
+      // Administrator
+      const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
+      const dbImages = DB.getAllImages();
+      const dbOriginalIds = dbImages.filter(img => img.output_drive_id).map(img => img.original_drive_id);
+
+      if (subtab === 'untagged') {
+        // Samo neobrađene slike iz ulaznog foldera (koje nisu kopirane u bazi)
+        filesToRender = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
+      } else if (subtab === 'tagged') {
+        // Samo obrađene slike iz baze
+        filesToRender = dbImages
+          .filter(img => img.output_drive_id)
+          .map(img => {
+            const ext = img.original_filename.split('.').pop() || 'jpg';
+            return {
+              id: img.output_drive_id,
+              name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
+              mimeType: 'image/jpeg'
+            };
+          });
+      } else {
+        // Sve slike: neobrađene iz ulazne mape + obrađene iz baze
+        const untagged = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
+        const tagged = dbImages
+          .filter(img => img.output_drive_id)
+          .map(img => {
+            const ext = img.original_filename.split('.').pop() || 'jpg';
+            return {
+              id: img.output_drive_id,
+              name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
+              mimeType: 'image/jpeg'
+            };
+          });
+        filesToRender = [...untagged, ...tagged];
+      }
+    }
+
     filesToRender = filesToRender.filter(file => {
       const imageRec = DB.getImageByDriveId(file.id);
       const tags = imageRec ? DB.getTagsByImageId(imageRec.id) : [];
-      const tagCount = tags.length;
-      
-      // Filteri na temelju uloge
-      if (_userRole === 'visitor') {
-        // Posjetitelj vidi samo označene slike
-        if (tagCount === 0) return false;
-      } else {
-        // Admin subtab filteri
-        const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
-        if (subtab === 'tagged' && tagCount === 0) return false;
-        if (subtab === 'untagged' && tagCount > 0) return false;
-      }
 
       // Pretraga
       if (!query) return true;
@@ -637,18 +681,69 @@ const App = (function () {
   }
 
   async function openInEditor(file) {
+    let imageRec = DB.getAllImages().find(img => img.original_drive_id === file.id || img.output_drive_id === file.id);
+
+    if (_userRole === 'admin') {
+      if (!imageRec || !imageRec.output_drive_id) {
+        const settings = DB.getSettings();
+        const outputFolderId = settings.outputFolderId;
+        if (!outputFolderId) {
+          UI.toast('Prvo odaberite izlaznu mapu u postavkama.', 'error');
+          return;
+        }
+
+        UI.showLoading('Kopiranje i priprema originalne slike na Google Drive...');
+
+        const images = DB.getAllImages();
+        let maxSeq = 0;
+        images.forEach(img => {
+          if (img.sequence_no && img.sequence_no > maxSeq) {
+            maxSeq = img.sequence_no;
+          }
+        });
+        const nextSeq = maxSeq + 1;
+        const ext = file.name.split('.').pop() || 'jpg';
+        const newFilename = `Antunovac-u-slici-${String(nextSeq).padStart(4, '0')}.${ext}`;
+
+        try {
+          const response = await DriveAPI.copyFile(file.id, outputFolderId, newFilename);
+          const copiedFile = response.file;
+
+          imageRec = DB.saveImage({
+            id: imageRec ? imageRec.id : null,
+            original_drive_id: file.id,
+            original_filename: file.name,
+            output_drive_id: copiedFile.id,
+            status: 'processed',
+            sequence_no: nextSeq,
+            folder_id: settings.inputFolderId
+          });
+
+          file = { id: copiedFile.id, name: copiedFile.name };
+        } catch (err) {
+          console.error('[App] Kopiranje slike neuspješno:', err);
+          UI.toast('Greška pri kopiranju slike: ' + err.message, 'error');
+          UI.hideLoading();
+          return;
+        }
+      } else {
+        const ext = imageRec.original_filename.split('.').pop() || 'jpg';
+        file = {
+          id: imageRec.output_drive_id,
+          name: `Antunovac-u-slici-${String(imageRec.sequence_no).padStart(4, '0')}.${ext}`
+        };
+      }
+    }
+
     UI.showView('editor');
     UI.showLoading('Učitavanje optimizirane fotografije (1600px)...');
 
     try {
-      // Koristimo optimizirani thumbnail od 1600px za crtanje i označavanje
       const optimizedUrl = DriveAPI.getThumbnailUrl(file.id, 1600);
       await CanvasEngine.loadImageFromUrl(optimizedUrl, file.id, file);
 
       document.getElementById('editor-filename').textContent = file.name;
 
-      // Inicijaliziraj image record u DB
-      let imageRec = DB.getImageByDriveId(file.id);
       if (!imageRec) {
         imageRec = DB.saveImage({
           original_drive_id: file.id,
@@ -673,8 +768,16 @@ const App = (function () {
 
       // Učitaj komentare
       renderEditorComments(file.id);
+
+      // Osvježi galeriju u pozadini da se ne prikazuje u popisu za uvoz
+      const settings = DB.getSettings();
+      if (settings.inputFolderId) {
+        loadGallery(settings.inputFolderId);
+      }
     } catch (e) {
-      UI.toast('Greška: ' + e.message, 'error');
+      console.error('[App] Učitavanje u editor neuspješno:', e);
+      UI.toast('Greška pri učitavanju u editor: ' + e.message, 'error');
+      UI.showView('gallery');
     } finally {
       UI.hideLoading();
     }
