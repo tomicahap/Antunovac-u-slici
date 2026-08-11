@@ -340,6 +340,143 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
   }
 });
 
+// ─── POST /api/drive/file/:id/crop-and-upload ────────────────────────────
+// Izrezivanje i izravan prijenos na Google Drive s poslužitelja (bez slanja klijentu)
+router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
+  try {
+    const drive = await getDriveClient(req.session);
+    const { id } = req.params;
+    const { x, y, width, height, folderId, filename, existingFileId } = req.body;
+
+    if (!folderId || !filename) {
+      return res.status(400).json({ error: 'Nedostaje folderId ili filename.' });
+    }
+
+    // 1. Dohvati metapodatke o datoteci radi točnog formata (mimeType)
+    const fileMetadata = await drive.files.get({
+      fileId: id,
+      fields: 'name, mimeType'
+    });
+    const originalMimeType = fileMetadata.data.mimeType || 'image/jpeg';
+    console.log(`[CropAndUpload] Datoteka: ${fileMetadata.data.name}, originalni MIME tip: ${originalMimeType}`);
+
+    // 2. Preuzmi medijski sadržaj
+    const fileResponse = await drive.files.get(
+      { fileId: id, alt: 'media' },
+      { responseType: 'stream' }
+    );
+
+    const chunks = [];
+    fileResponse.data.on('data', chunk => chunks.push(chunk));
+    fileResponse.data.on('end', async () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        let sharp;
+        try { sharp = require('sharp'); } catch(e) { throw new Error('Sharp nije instaliran.'); }
+        
+        // Bake orientation before cropping to align coordinate system
+        const rotatedBuffer = await sharp(buffer).rotate().toBuffer();
+        const img = sharp(rotatedBuffer);
+        const meta = await img.metadata();
+        
+        console.log(`[CropAndUpload] Originalna veličina: ${meta.width}x${meta.height}, format: ${meta.format}`);
+        
+        const px = Math.round((x / 100) * meta.width);
+        const py = Math.round((y / 100) * meta.height);
+        const pw = Math.round((width / 100) * meta.width);
+        const ph = Math.round((height / 100) * meta.height);
+        
+        const cropX = Math.max(0, px);
+        const cropY = Math.max(0, py);
+        const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
+        const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
+
+        console.log(`[CropAndUpload] Rezanje: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
+
+        let processed = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
+
+        if (originalMimeType && (originalMimeType.includes('tiff') || originalMimeType.includes('tif'))) {
+          processed = processed.tiff({
+            compression: 'none',
+            quality: 100,
+            xres: 300,
+            yres: 300
+          });
+        } else if (originalMimeType && originalMimeType.includes('png')) {
+          processed = processed.png({
+            compressionLevel: 0,
+            xres: 300,
+            yres: 300
+          });
+        } else if (originalMimeType && originalMimeType.includes('webp')) {
+          processed = processed.webp({
+            quality: 100,
+            lossless: true
+          });
+        } else {
+          processed = processed.jpeg({
+            quality: 100,
+            chromaSubsampling: '4:4:4',
+            xres: 300,
+            yres: 300
+          });
+        }
+
+        const outBuffer = await processed.toBuffer();
+        console.log(`[CropAndUpload] Rezanje uspješno. Veličina buffera: ${outBuffer.length} bajtova.`);
+
+        // 3. Prenesi novonastalu sliku izravno na Google Drive
+        const { Readable } = require('stream');
+        const uploadStream = Readable.from(outBuffer);
+
+        let response;
+        if (existingFileId) {
+          // Prepiši postojeći portret
+          console.log(`[CropAndUpload] Ažuriranje postojećeg portreta: ${existingFileId}`);
+          response = await drive.files.update({
+            fileId: existingFileId,
+            media: {
+              mimeType: originalMimeType,
+              body: uploadStream
+            },
+            fields: 'id, name, webViewLink'
+          });
+        } else {
+          // Riješi konflikt naziva i kreiraj novu datoteku
+          const finalFilename = await resolveFilenameConflict(drive, folderId, filename);
+          console.log(`[CropAndUpload] Kreiranje novog portreta: ${finalFilename} u mapi: ${folderId}`);
+          response = await drive.files.create({
+            requestBody: {
+              name: finalFilename,
+              parents: [folderId]
+            },
+            media: {
+              mimeType: originalMimeType,
+              body: uploadStream
+            },
+            fields: 'id, name, webViewLink'
+          });
+        }
+
+        res.json({
+          success: true,
+          fileId: response.data.id,
+          filename: response.data.name,
+          webViewLink: response.data.webViewLink
+        });
+      } catch (err) {
+        console.error('[CropAndUpload] Greška pri obradi/prijenosu:', err);
+        res.status(500).json({ error: 'Greška pri obradi/prijenosu: ' + err.message });
+      }
+    });
+    fileResponse.data.on('error', err => {
+      res.status(500).json({ error: 'Greška pri preuzimanju originala.' });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/drive/upload ──────────────────────────────────────────────────
 // Upload datoteke u Google Drive mapu
 router.post('/upload', upload.single('file'), async (req, res) => {

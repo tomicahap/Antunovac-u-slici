@@ -244,6 +244,10 @@ const DriveAPI = (function () {
     return request('POST', `/drive/file/${fileId}/copy`, { outputFolderId, newFilename });
   }
 
+  async function cropAndUploadFile(fileId, params) {
+    return request('POST', `/drive/file/${fileId}/crop-and-upload`, params);
+  }
+
   // ─── Public API ─────────────────────────────────────────────────────────────
   return {
     // Auth
@@ -252,7 +256,7 @@ const DriveAPI = (function () {
     getFolders, resolveUrl, createFolder,
     // Datoteke
     getFiles, getFileMetadata, getImageUrl, getThumbnailUrl, getCdnUrl, downloadImage, deleteFile,
-    uploadFile, uploadBlob, copyFile,
+    uploadFile, uploadBlob, copyFile, cropAndUploadFile,
     // Config
     getConfig
   };

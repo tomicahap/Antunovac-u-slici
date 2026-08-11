@@ -300,17 +300,19 @@ const Tags = (function () {
              continue; // Preskačemo jer se ništa nije promijenilo
           }
 
-          const portraitBlob = await CanvasEngine.cropPortrait(tag);
           const portraitFilename = buildPortraitFilename(person, meta.name, imageRec.sequence_no || globalImageSequence - 1, tagIndex);
+          const fileId = imageRec.output_drive_id || imageRec.original_drive_id || _currentImageId;
 
-          // Ako već postoji portrait_drive_id, pregađamo ga (overwrite)
-          const portraitResult = await DriveAPI.uploadBlob(
-            portraitsFolder.folderId,
-            portraitFilename,
-            portraitBlob,
-            null,
-            tag.portrait_drive_id || null
-          );
+          // Pozovi backend API da izreže i učita sliku u jednom koraku
+          const portraitResult = await DriveAPI.cropAndUploadFile(fileId, {
+            x: tag.x,
+            y: tag.y,
+            width: tag.width,
+            height: tag.height,
+            folderId: portraitsFolder.folderId,
+            filename: portraitFilename,
+            existingFileId: tag.portrait_drive_id || null
+          });
 
           // Ažuriraj tag s Drive ID-em portreta i spremimo trenutno stanje
           DB.saveTag({
