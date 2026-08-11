@@ -1,4 +1,5 @@
-const admin = require('firebase-admin');
+const { initializeApp, cert, getApps } = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,7 +15,8 @@ try {
   
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+      serviceAccount = typeof saRaw === 'string' ? JSON.parse(saRaw) : saRaw;
     } catch (e) {
       try {
         serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8'));
@@ -31,15 +33,17 @@ try {
   }
 
   if (serviceAccount) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    db = admin.firestore();
+    if (getApps().length === 0) {
+      initializeApp({
+        credential: cert(serviceAccount)
+      });
+    }
+    db = getFirestore();
     enabled = true;
     projectId = serviceAccount.project_id || serviceAccount.projectId || '';
     console.log('[Firebase] Uspješno inicijaliziran Firestore za projekt:', projectId);
   } else {
-    console.log('[Firebase] Firebase varijable nisu postavljene. Koristi se lokalni fallback (data/db.json).');
+    console.log('[Firebase] Firebase projekt: (nije konfiguriran)');
   }
 } catch (err) {
   console.error('[Firebase] Greška pri inicijalizaciji:', err.message);
