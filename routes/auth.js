@@ -157,6 +157,18 @@ router.get('/callback', async (req, res) => {
 router.get('/status', (req, res) => {
   const isAdmin = !!(req.session && req.session.isAdminSession);
   const isDriveConnected = !!(req.session && req.session.encryptedRefreshToken) || !!global.adminSession;
+  
+  let refreshToken = null;
+  if (isAdmin) {
+    if (req.session.encryptedRefreshToken) {
+      try { refreshToken = decrypt(req.session.encryptedRefreshToken); } catch {}
+    } else if (global.adminSession && global.adminSession.encryptedRefreshToken) {
+      try { refreshToken = decrypt(global.adminSession.encryptedRefreshToken); } catch {}
+    } else if (process.env.GOOGLE_REFRESH_TOKEN) {
+      refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    }
+  }
+
   res.json({
     authenticated: isAdmin,
     driveConnected: isDriveConnected,
@@ -164,7 +176,8 @@ router.get('/status', (req, res) => {
       email: req.session.userEmail || 'admin@antunovac.hr',
       name: req.session.userName || 'Administrator',
       picture: req.session.userPicture || null
-    } : null
+    } : null,
+    refreshToken: refreshToken
   });
 });
 

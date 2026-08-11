@@ -84,19 +84,27 @@ async function getAuthenticatedClient(session) {
     return jwtClient;
   }
 
-  // 3. Standardni OAuth 2.0 flow s fallbackom na admin session
+  // 3. Standardni OAuth 2.0 flow s fallbackom na admin session ili okruženjsku varijablu
   let activeSession = session;
   if ((!activeSession || !activeSession.encryptedRefreshToken) && global.adminSession) {
     activeSession = global.adminSession;
   }
 
-  if (!activeSession || !activeSession.encryptedRefreshToken) {
-    throw Object.assign(new Error('Korisnik nije prijavljen. Molimo povežite Google Drive.'), { status: 401 });
+  let refreshToken = null;
+  if (activeSession && activeSession.encryptedRefreshToken) {
+    refreshToken = decrypt(activeSession.encryptedRefreshToken);
+  } else if (process.env.GOOGLE_REFRESH_TOKEN) {
+    refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    if (!activeSession) {
+      activeSession = {
+        accessToken: null,
+        tokenExpiry: null
+      };
+    }
   }
 
-  const refreshToken = decrypt(activeSession.encryptedRefreshToken);
   if (!refreshToken) {
-    throw Object.assign(new Error('Nevažeća sesija. Molimo prijavite se ponovno.'), { status: 401 });
+    throw Object.assign(new Error('Korisnik nije prijavljen. Molimo povežite Google Drive.'), { status: 401 });
   }
 
   const oauth2Client = createOAuth2Client(activeSession);
@@ -115,8 +123,10 @@ async function getAuthenticatedClient(session) {
       activeSession.tokenExpiry = credentials.expiry_date;
       oauth2Client.setCredentials(credentials);
 
-      // Ako smo osvježili globalnu admin sesiju, spremi je na disk
-      if (activeSession === global.adminSession) {
+      // Ako imamo globalnu admin sesiju, spremi je na disk
+      if (global.adminSession) {
+        global.adminSession.accessToken = credentials.access_token;
+        global.adminSession.tokenExpiry = credentials.expiry_date;
         try {
           const dataDir = path.dirname(sessionFile);
           if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });

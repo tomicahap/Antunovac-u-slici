@@ -595,6 +595,46 @@ const fs = require('fs');
 const path = require('path');
 const dbFile = path.join(__dirname, '..', 'data', 'db.json');
 
+// Pokretanje pozadinskog preuzimanja baze s Google Drive-a na startu poslužitelja ako lokalna datoteka ne postoji
+setTimeout(async () => {
+  if (!fs.existsSync(dbFile)) {
+    try {
+      const { getDriveClient } = require('../utils/driveClient');
+      const drive = await getDriveClient(null);
+      
+      console.log('[Startup] Pokušaj preuzimanja baze antunovac_db.json s Google Drive-a...');
+      const filesResponse = await drive.files.list({
+        q: "name = 'antunovac_db.json' and trashed = false",
+        fields: 'files(id, name)',
+        pageSize: 1
+      });
+
+      const files = filesResponse.data.files || [];
+      if (files.length > 0) {
+        const fileId = files[0].id;
+        const downloadResponse = await drive.files.get(
+          { fileId, alt: 'media' },
+          { responseType: 'text' }
+        );
+        
+        let dbData = downloadResponse.data;
+        if (typeof dbData === 'string') {
+          try { dbData = JSON.parse(dbData); } catch {}
+        }
+        
+        const dataDir = path.dirname(dbFile);
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
+        console.log('[Startup] Uspješno preuzeta i pohranjena zajednička baza s Google Drive-a.');
+      } else {
+        console.log('[Startup] Nije pronađena postojeća baza antunovac_db.json na Google Drive-u.');
+      }
+    } catch (err) {
+      console.warn('[Startup] Nije moguće preuzeti bazu s Google Drive-a (vjerojatno još nema spojenog računa ili varijabli):', err.message);
+    }
+  }
+}, 5000);
+
 // ─── GET /api/drive/db/load ──────────────────────────────────────────────────
 // Učitava bazu podataka s Google Drive-a ili iz lokalnog cache-a
 router.get('/db/load', async (req, res) => {

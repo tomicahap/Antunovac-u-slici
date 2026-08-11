@@ -12,8 +12,15 @@ const App = (function () {
   let _folderPickerTarget = null; // 'input' | 'output'
   let _folderPickerSelectedId = null;
   let _folderPickerBreadcrumb = [{ id: 'root', name: 'Moj Drive' }];
-
   let _userRole = 'visitor'; // 'admin' | 'visitor'
+
+  // Varijable za optimizaciju renderiranja i izbjegavanje nepotrebnog reloadanja
+  let _lastPortraitsQuery = null;
+  let _lastImagesQuery = null;
+  let _lastImagesSubtab = null;
+  let _lastImagesFilesLength = 0;
+  let _portraitsGridPopulated = false;
+  let _imagesGridPopulated = false;
 
   // ─── Inicijalizacija ───────────────────────────────────────────────────────
 
@@ -218,6 +225,18 @@ const App = (function () {
 
     if (tagsListContainer) tagsListContainer.style.display = ''; // Prikazujemo listu oznaka i za admina i posjetitelja
 
+    // Prikaži/sakrij refresh token karticu ovisno o autorizaciji
+    const refreshTokenCard = document.getElementById('refresh-token-card');
+    const refreshTokenVal = document.getElementById('refresh-token-val');
+    if (refreshTokenCard) {
+      if (_authStatus?.authenticated && _authStatus?.refreshToken) {
+        refreshTokenCard.style.display = '';
+        if (refreshTokenVal) refreshTokenVal.value = _authStatus.refreshToken;
+      } else {
+        refreshTokenCard.style.display = 'none';
+      }
+    }
+
     CanvasEngine.setReadOnly(_userRole !== 'admin');
 
     // Baza osoba
@@ -343,6 +362,12 @@ const App = (function () {
   async function loadGallery(folderId, append = false) {
     // Posjetitelji i offline način uvijek dohvaćaju obrađene podatke iz baze
     if (_userRole === 'visitor' || !_authStatus?.driveConnected) {
+       _portraitsGridPopulated = false;
+       _imagesGridPopulated = false;
+       _lastPortraitsQuery = null;
+       _lastImagesQuery = null;
+       _lastImagesSubtab = null;
+
        const images = DB.getAllImages();
        _galleryFiles = images
          .filter(img => img.output_drive_id)
@@ -360,13 +385,18 @@ const App = (function () {
 
     if (!folderId) return;
 
-    const grid = document.getElementById('gallery-grid');
+    const grid = document.getElementById('gallery-images-grid');
     const emptyEl = document.getElementById('gallery-empty');
     const loadMoreEl = document.getElementById('gallery-load-more');
 
     if (!append) {
       _galleryFiles = [];
       _galleryNextPageToken = null;
+      _imagesGridPopulated = false;
+      _portraitsGridPopulated = false;
+      _lastPortraitsQuery = null;
+      _lastImagesQuery = null;
+      _lastImagesSubtab = null;
       grid.querySelectorAll('.gallery-item,.gallery-item-loading').forEach(el => el.remove());
       // Prikaži spinner
       for (let i = 0; i < 8; i++) {
@@ -395,11 +425,10 @@ const App = (function () {
   }
 
   function renderCurrentGallery() {
-    const grid = document.getElementById('gallery-grid');
+    const gridPortraits = document.getElementById('gallery-portraits-grid');
+    const gridImages = document.getElementById('gallery-images-grid');
     const emptyEl = document.getElementById('gallery-empty');
     const loadMoreEl = document.getElementById('gallery-load-more');
-    
-    grid.querySelectorAll('.gallery-item,.gallery-item-loading').forEach(el => el.remove());
 
     let currentTab = 'portraits'; // Zadano
     const activeTabBtn = document.querySelector('.gallery-tab-btn.active');
@@ -407,9 +436,30 @@ const App = (function () {
 
     const query = (document.getElementById('gallery-search-input')?.value || '').toLowerCase().trim();
 
+    // 1. Prikaži/sakrij odgovarajući grid u DOM-u (CSS Toggle)
     if (currentTab === 'portraits') {
+      if (gridPortraits) gridPortraits.style.display = 'grid';
+      if (gridImages) gridImages.style.display = 'none';
+    } else {
+      if (gridPortraits) gridPortraits.style.display = 'none';
+      if (gridImages) gridImages.style.display = 'grid';
+    }
+
+    if (currentTab === 'portraits') {
+      // 2. Optimizacija: re-renderaj portrete samo ako se pretraga promijenila ili grid još nije napunjen
+      if (_portraitsGridPopulated && _lastPortraitsQuery === query) {
+        const count = gridPortraits.querySelectorAll('.portrait-gallery-item').length;
+        const countEl = document.getElementById('gallery-count');
+        if (countEl) countEl.textContent = `${count} portreta`;
+        if (emptyEl) emptyEl.style.display = count === 0 ? '' : 'none';
+        if (loadMoreEl) loadMoreEl.style.display = 'none';
+        return;
+      }
+
+      // Očisti samo portraits grid
+      if (gridPortraits) gridPortraits.innerHTML = '';
+
       const allTags = DB.getAllTags();
-      // Prikazujemo samo oznake koje imaju povezanu osobu
       const portraitTags = allTags.filter(t => t.person_id);
 
       const filteredTags = portraitTags.filter(t => {
@@ -422,33 +472,50 @@ const App = (function () {
         return name.includes(query) || note.includes(query);
       });
 
-      // Ažuriraj brojke
       const countEl = document.getElementById('gallery-count');
       if (countEl) countEl.textContent = `${filteredTags.length} portreta`;
 
       if (filteredTags.length === 0) {
         if (emptyEl) emptyEl.style.display = '';
         if (loadMoreEl) loadMoreEl.style.display = 'none';
-        return;
+      } else {
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (loadMoreEl) loadMoreEl.style.display = 'none';
+
+        filteredTags.forEach(tag => {
+          const person = DB.getPersonById(tag.person_id);
+          if (person && gridPortraits) {
+            gridPortraits.appendChild(createPortraitItem(tag, person));
+          }
+        });
       }
 
-      if (emptyEl) emptyEl.style.display = 'none';
-      if (loadMoreEl) loadMoreEl.style.display = 'none';
-
-      filteredTags.forEach(tag => {
-        const person = DB.getPersonById(tag.person_id);
-        if (person) {
-          grid.appendChild(createPortraitItem(tag, person));
-        }
-      });
+      _lastPortraitsQuery = query;
+      _portraitsGridPopulated = true;
       return;
     }
 
-    // Fotografije
+    // Tab "Slike" (Fotografije)
+    const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
+
+    // 3. Optimizacija: re-renderaj slike samo ako se pretraga, pod-tab ili broj datoteka promijenio
+    if (_imagesGridPopulated && _lastImagesQuery === query && _lastImagesSubtab === subtab && _lastImagesFilesLength === _galleryFiles.length) {
+      const count = gridImages.querySelectorAll('.gallery-item').length;
+      const countEl = document.getElementById('gallery-count');
+      if (countEl) countEl.textContent = `${count} slika`;
+      if (emptyEl) emptyEl.style.display = count === 0 ? '' : 'none';
+      if (loadMoreEl) {
+        loadMoreEl.style.display = (_galleryNextPageToken && _authStatus?.driveConnected && subtab !== 'tagged') ? '' : 'none';
+      }
+      return;
+    }
+
+    // Očisti samo images grid
+    if (gridImages) gridImages.innerHTML = '';
+
     let filesToRender = [];
 
     if (_userRole === 'visitor') {
-      // Posjetitelji vide isključivo označene, kopirane slike iz baze
       const images = DB.getAllImages();
       filesToRender = images
         .filter(img => img.output_drive_id && DB.getTagsByImageId(img.id).length > 0)
@@ -461,16 +528,12 @@ const App = (function () {
           };
         });
     } else {
-      // Administrator
-      const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
       const dbImages = DB.getAllImages();
       const dbOriginalIds = dbImages.filter(img => img.output_drive_id).map(img => img.original_drive_id);
 
       if (subtab === 'untagged') {
-        // Samo neobrađene slike iz ulaznog foldera (koje nisu kopirane u bazi)
         filesToRender = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
       } else if (subtab === 'tagged') {
-        // Samo obrađene slike iz baze
         filesToRender = dbImages
           .filter(img => img.output_drive_id)
           .map(img => {
@@ -482,7 +545,6 @@ const App = (function () {
             };
           });
       } else {
-        // Sve slike: neobrađene iz ulazne mape + obrađene iz baze
         const untagged = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
         const tagged = dbImages
           .filter(img => img.output_drive_id)
@@ -502,7 +564,6 @@ const App = (function () {
       const imageRec = DB.getImageByDriveId(file.id);
       const tags = imageRec ? DB.getTagsByImageId(imageRec.id) : [];
 
-      // Pretraga
       if (!query) return true;
 
       const matchName = file.name.toLowerCase().includes(query);
@@ -516,7 +577,6 @@ const App = (function () {
       return matchName || matchDonor || matchPerson;
     });
 
-    // Ažuriraj brojke
     const countEl = document.getElementById('gallery-count');
     if (countEl) countEl.textContent = `${filesToRender.length} slika`;
 
@@ -526,13 +586,18 @@ const App = (function () {
     } else {
       if (emptyEl) emptyEl.style.display = 'none';
       filesToRender.forEach(file => {
-        grid.appendChild(createGalleryItem(file));
+        if (gridImages) gridImages.appendChild(createGalleryItem(file));
       });
     }
 
     if (loadMoreEl) {
-      loadMoreEl.style.display = (_galleryNextPageToken && _authStatus?.driveConnected) ? '' : 'none';
+      loadMoreEl.style.display = (_galleryNextPageToken && _authStatus?.driveConnected && subtab !== 'tagged') ? '' : 'none';
     }
+
+    _lastImagesQuery = query;
+    _lastImagesSubtab = subtab;
+    _lastImagesFilesLength = _galleryFiles.length;
+    _imagesGridPopulated = true;
   }
 
   function createPortraitItem(tag, person) {
