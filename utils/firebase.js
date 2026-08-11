@@ -74,6 +74,7 @@ function writeLocalDb(data) {
 
 // Granularno spremanje u Firestore ili lokalni fallback
 async function saveDoc(collectionName, docId, data) {
+  cacheData = null; // Invalidiraj keš
   if (enabled && db) {
     try {
       const docRef = db.collection(collectionName).doc(docId);
@@ -109,6 +110,7 @@ async function saveDoc(collectionName, docId, data) {
 
 // Granularno brisanje
 async function deleteDoc(collectionName, docId) {
+  cacheData = null; // Invalidiraj keš
   if (enabled && db) {
     try {
       await db.collection(collectionName).doc(docId).delete();
@@ -130,8 +132,16 @@ async function deleteDoc(collectionName, docId) {
   }
 }
 
-// Učitavanje cjelokupne baze
+let cacheData = null;
+let cacheTime = 0;
+
+// Učitavanje cjelokupne baze s pametnim keširanjem (10 sekundi)
 async function loadAll() {
+  const now = Date.now();
+  if (cacheData && (now - cacheTime < 10000)) {
+    return cacheData;
+  }
+
   if (enabled && db) {
     try {
       console.log('[Firebase] Učitavanje cijele baze iz Firestorea...');
@@ -159,6 +169,8 @@ async function loadAll() {
       }
 
       console.log(`[Firebase] Uspješno učitano: ${result.persons.length} osoba, ${result.tags.length} tagova, ${result.images.length} slika, ${result.comments.length} komentara.`);
+      cacheData = result;
+      cacheTime = now;
       return result;
     } catch (err) {
       console.error('[Firebase] Greška pri loadAll, vraćam lokalni fallback:', err.message);

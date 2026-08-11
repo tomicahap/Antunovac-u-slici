@@ -203,7 +203,7 @@ router.get('/file/:id/download', async (req, res) => {
           res.set({
             'Content-Type': 'image/jpeg',
             'Content-Length': jpegBuffer.length,
-            'Cache-Control': 'private, max-age=3600',
+            'Cache-Control': 'public, max-age=31536000, immutable',
             'X-Original-Format': 'tiff',
             'X-Original-Filename': fileMeta.name
           });
@@ -221,7 +221,7 @@ router.get('/file/:id/download', async (req, res) => {
       // Direktni proxy streama
       res.set({
         'Content-Type': fileMeta.mimeType || 'application/octet-stream',
-        'Cache-Control': 'private, max-age=3600',
+        'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Original-Filename': fileMeta.name
       });
       fileResponse.data.pipe(res);
@@ -259,7 +259,7 @@ router.get('/file/:id/thumbnail', async (req, res) => {
 
       res.set({
         'Content-Type': 'image/jpeg', // Google thumbnaili su uvijek JPEG
-        'Cache-Control': 'private, max-age=86400',
+        'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Original-Filename': fileMeta.name
       });
       response.data.pipe(res);
@@ -271,7 +271,7 @@ router.get('/file/:id/thumbnail', async (req, res) => {
       );
       res.set({
         'Content-Type': fileMeta.mimeType || 'application/octet-stream',
-        'Cache-Control': 'private, max-age=86400',
+        'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Original-Filename': fileMeta.name
       });
       fileResponse.data.pipe(res);
@@ -465,7 +465,7 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
       .rotate()
       .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
       .resize(webW, webH)
-      .jpeg({ quality: 65, chromaSubsampling: '4:2:0' });
+      .webp({ quality: 65, effort: 4 });
 
     // 5. Upload TISAK verzije izravno iz streama
     let tisakResponse;
@@ -495,20 +495,22 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
       });
     }
 
-    // 6. Upload WEB verzije izravno iz streama
+    // 6. Upload WEB verzije izravno iz streama (kao WebP)
     let webResponse;
+    const webFilename = filename.lastIndexOf('.') > 0 ? (filename.substring(0, filename.lastIndexOf('.')) + '.webp') : (filename + '.webp');
+
     if (existingFileId) {
       console.log(`[CropAndUpload] Ažuriranje postojećeg WEB portreta: ${existingFileId}`);
       webResponse = await drive.files.update({
         fileId: existingFileId,
         media: {
-          mimeType: 'image/jpeg',
+          mimeType: 'image/webp',
           body: processedWeb
         },
         fields: 'id, name, webViewLink'
       });
     } else {
-      const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, filename);
+      const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, webFilename);
       console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${webFolderId}`);
       webResponse = await drive.files.create({
         requestBody: {
@@ -516,7 +518,7 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
           parents: [webFolderId]
         },
         media: {
-          mimeType: 'image/jpeg',
+          mimeType: 'image/webp',
           body: processedWeb
         },
         fields: 'id, name, webViewLink'
@@ -859,6 +861,142 @@ router.get('/db/load', async (req, res) => {
   } catch (err) {
     console.error('[DB-Load] Greška:', err.message);
     res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
+  }
+});
+
+// ─── GET /api/drive/db/query ──────────────────────────────────────────────────
+// Paginirani i filtrirani upiti za portrete i slike iz baze (Firestore ili lokalni fallback)
+router.get('/db/query', async (req, res) => {
+  try {
+    const { tab, subtab, limit = 30, startAfter, search } = req.query;
+    const limitNum = parseInt(limit, 10);
+
+    // Učitaj sve podatke (Firestore loadAll radi pametno keširanje ili local fallback)
+    const data = await firebaseDb.loadAll();
+
+    const searchQuery = (search || '').toLowerCase().trim();
+
+    if (tab === 'portraits') {
+      // 1. Filtriraj portrete (tagove koji imaju person_id ili person_ime)
+      let portraits = data.tags.filter(t => t.person_id || t.person_ime);
+
+      if (searchQuery) {
+        portraits = portraits.filter(t => {
+          const ime = (t.person_ime || '').toLowerCase();
+          const prezime = (t.person_prezime || '').toLowerCase();
+          const fullName = `${ime} ${prezime}`;
+          const years = `${t.person_godina_rodenja || ''} ${t.person_godina_smrti || ''}`;
+          
+          let personNote = '';
+          if (t.person_id) {
+            const p = data.persons.find(pers => pers.id === t.person_id);
+            if (p) personNote = (p.napomena || '').toLowerCase();
+          }
+
+          return fullName.includes(searchQuery) || years.includes(searchQuery) || personNote.includes(searchQuery);
+        });
+      }
+
+      // Sortiraj po id-u silazno
+      portraits.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
+
+      // Paginacija
+      let startIndex = 0;
+      if (startAfter) {
+        const index = portraits.findIndex(p => p.id === startAfter);
+        if (index !== -1) {
+          startIndex = index + 1;
+        }
+      }
+
+      const paginated = portraits.slice(startIndex, startIndex + limitNum);
+      const hasMore = startIndex + limitNum < portraits.length;
+
+      // Vrati i povezane osobe kako bi klijent imao sve podatke
+      const personsMap = {};
+      paginated.forEach(t => {
+        if (t.person_id) {
+          const p = data.persons.find(pers => pers.id === t.person_id);
+          if (p) personsMap[p.id] = p;
+        }
+      });
+
+      return res.json({
+        items: paginated,
+        persons: personsMap,
+        hasMore,
+        nextStartAfter: paginated.length > 0 ? paginated[paginated.length - 1].id : null
+      });
+
+    } else {
+      // 2. Slike (images)
+      let images = [];
+      const dbImages = data.images.filter(img => img.output_drive_id);
+
+      if (subtab === 'tagged') {
+        images = dbImages.filter(img => {
+          const tags = data.tags.filter(t => t.image_id === img.id);
+          return tags.length > 0;
+        });
+      } else if (subtab === 'untagged') {
+        images = dbImages.filter(img => {
+          const tags = data.tags.filter(t => t.image_id === img.id);
+          return tags.length === 0;
+        });
+      } else {
+        // all
+        images = dbImages;
+      }
+
+      if (searchQuery) {
+        images = images.filter(img => {
+          const matchName = (img.original_filename || '').toLowerCase().includes(searchQuery);
+          const matchDonor = (img.donor || '').toLowerCase().includes(searchQuery);
+          
+          const imgTags = data.tags.filter(t => t.image_id === img.id);
+          const matchPerson = imgTags.some(t => {
+            const ime = (t.person_ime || '').toLowerCase();
+            const prezime = (t.person_prezime || '').toLowerCase();
+            return `${ime} ${prezime}`.includes(searchQuery);
+          });
+
+          return matchName || matchDonor || matchPerson;
+        });
+      }
+
+      // Sortiraj po rednom broju silazno
+      images.sort((a, b) => (b.sequence_no || 0) - (a.sequence_no || 0));
+
+      let startIndex = 0;
+      if (startAfter) {
+        const index = images.findIndex(img => img.id === startAfter);
+        if (index !== -1) {
+          startIndex = index + 1;
+        }
+      }
+
+      const paginated = images.slice(startIndex, startIndex + limitNum);
+      const hasMore = startIndex + limitNum < images.length;
+
+      // Mapiraj u format galerije
+      const formatted = paginated.map(img => {
+        const ext = img.original_filename.split('.').pop() || 'jpg';
+        return {
+          id: img.output_drive_id,
+          name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
+          mimeType: 'image/jpeg'
+        };
+      });
+
+      return res.json({
+        items: formatted,
+        hasMore,
+        nextStartAfter: paginated.length > 0 ? paginated[paginated.length - 1].id : null
+      });
+    }
+  } catch (err) {
+    console.error('[DB-Query] Greška:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

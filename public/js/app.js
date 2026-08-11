@@ -359,67 +359,136 @@ const App = (function () {
 
   // ─── Galerija ─────────────────────────────────────────────────────────────
 
+  // Paginacija i pretraživanje
+  let _dbNextStartAfter = null;
+  let _dbHasMore = false;
+  let _portraitsList = [];
+  let _imagesList = [];
+
   async function loadGallery(folderId, append = false) {
-    // Posjetitelji i offline način uvijek dohvaćaju obrađene podatke iz baze
-    if (_userRole === 'visitor' || !_authStatus?.driveConnected) {
-       _portraitsGridPopulated = false;
-       _imagesGridPopulated = false;
-       _lastPortraitsQuery = null;
-       _lastImagesQuery = null;
-       _lastImagesSubtab = null;
-
-       const images = DB.getAllImages();
-       _galleryFiles = images
-         .filter(img => img.output_drive_id)
-         .map(img => {
-           const ext = img.original_filename.split('.').pop() || 'jpg';
-           return {
-             id: img.output_drive_id,
-             name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
-             mimeType: 'image/jpeg'
-           };
-         });
-       renderCurrentGallery();
-       return;
-    }
-
-    if (!folderId) return;
-
-    const grid = document.getElementById('gallery-images-grid');
+    const currentTab = document.querySelector('.gallery-tab-btn.active')?.dataset.tab || 'portraits';
+    const searchQuery = (document.getElementById('gallery-search-input')?.value || '').toLowerCase().trim();
+    const gridPortraits = document.getElementById('gallery-portraits-grid');
+    const gridImages = document.getElementById('gallery-images-grid');
     const emptyEl = document.getElementById('gallery-empty');
     const loadMoreEl = document.getElementById('gallery-load-more');
 
+    // 1. Pripremi prikaz i očisti ako nije append
     if (!append) {
-      _galleryFiles = [];
+      _dbNextStartAfter = null;
+      _dbHasMore = false;
       _galleryNextPageToken = null;
+      _galleryFiles = [];
+      _portraitsList = [];
+      _imagesList = [];
       _imagesGridPopulated = false;
       _portraitsGridPopulated = false;
       _lastPortraitsQuery = null;
       _lastImagesQuery = null;
       _lastImagesSubtab = null;
-      grid.querySelectorAll('.gallery-item,.gallery-item-loading').forEach(el => el.remove());
-      // Prikaži spinner
-      for (let i = 0; i < 8; i++) {
-        const ph = document.createElement('div');
-        ph.className = 'gallery-item-loading';
-        ph.innerHTML = '<div class="spinner"></div>';
-        grid.appendChild(ph);
+
+      if (currentTab === 'portraits' && gridPortraits) {
+        gridPortraits.innerHTML = '';
+        for (let i = 0; i < 8; i++) {
+          const ph = document.createElement('div');
+          ph.className = 'gallery-item-loading';
+          ph.innerHTML = '<div class="spinner"></div>';
+          gridPortraits.appendChild(ph);
+        }
+      } else if (gridImages) {
+        gridImages.innerHTML = '';
+        for (let i = 0; i < 8; i++) {
+          const ph = document.createElement('div');
+          ph.className = 'gallery-item-loading';
+          ph.innerHTML = '<div class="spinner"></div>';
+          gridImages.appendChild(ph);
+        }
       }
     }
 
     try {
-      if (!append) {
-        const result = await DriveAPI.getFiles(folderId, _galleryNextPageToken, 40);
-        _galleryNextPageToken = result.nextPageToken || null;
-        _galleryFiles = result.files || [];
+      // 2. Odredi kako dohvaćamo podatke
+      if (currentTab === 'portraits') {
+        // PORTRETI: Uvijek iz Firestore baze, s paginacijom i pretraživanjem na backendu
+        const response = await fetch(`/api/drive/db/query?tab=portraits&limit=30&startAfter=${_dbNextStartAfter || ''}&search=${encodeURIComponent(searchQuery)}`).then(r => r.json());
+        
+        // Spremi dobivene osobe u lokalni DB cache za pretrage
+        if (response.persons) {
+          Object.values(response.persons).forEach(p => {
+            DB.savePerson(p, false); // false = ne sinkroniziraj natrag na server
+          });
+        }
+
+        if (append) {
+          _portraitsList.push(...(response.items || []));
+        } else {
+          _portraitsList = response.items || [];
+        }
+
+        _dbNextStartAfter = response.nextStartAfter || null;
+        _dbHasMore = response.hasMore || false;
+        
+        _portraitsGridPopulated = false;
+        renderCurrentGallery();
+
       } else {
-        const result = await DriveAPI.getFiles(folderId, _galleryNextPageToken, 40);
-        _galleryNextPageToken = result.nextPageToken || null;
-        _galleryFiles.push(...(result.files || []));
+        // SLIKE (Fotografije)
+        const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
+
+        if (_userRole === 'visitor') {
+          // Posjetitelj vidi samo slike iz baze koje imaju bar 1 tag
+          const response = await fetch(`/api/drive/db/query?tab=images&subtab=tagged&limit=30&startAfter=${_dbNextStartAfter || ''}&search=${encodeURIComponent(searchQuery)}`).then(r => r.json());
+
+          if (append) {
+            _imagesList.push(...(response.items || []));
+          } else {
+            _imagesList = response.items || [];
+          }
+
+          _dbNextStartAfter = response.nextStartAfter || null;
+          _dbHasMore = response.hasMore || false;
+
+          _imagesGridPopulated = false;
+          renderCurrentGallery();
+
+        } else {
+          // Administrator
+          if (subtab === 'tagged') {
+            // Tagirane slike iz baze
+            const response = await fetch(`/api/drive/db/query?tab=images&subtab=tagged&limit=30&startAfter=${_dbNextStartAfter || ''}&search=${encodeURIComponent(searchQuery)}`).then(r => r.json());
+
+            if (append) {
+              _imagesList.push(...(response.items || []));
+            } else {
+              _imagesList = response.items || [];
+            }
+
+            _dbNextStartAfter = response.nextStartAfter || null;
+            _dbHasMore = response.hasMore || false;
+
+            _imagesGridPopulated = false;
+            renderCurrentGallery();
+
+          } else {
+            // "all" ili "untagged" slike iz Google Drive mape
+            if (!folderId) return;
+            const result = await DriveAPI.getFiles(folderId, _galleryNextPageToken, 40);
+            _galleryNextPageToken = result.nextPageToken || null;
+            
+            if (append) {
+              _galleryFiles.push(...(result.files || []));
+            } else {
+              _galleryFiles = result.files || [];
+            }
+            
+            _imagesGridPopulated = false;
+            renderCurrentGallery();
+          }
+        }
       }
-      renderCurrentGallery();
     } catch (e) {
-      grid.querySelectorAll('.gallery-item-loading').forEach(el => el.remove());
+      if (gridPortraits) gridPortraits.querySelectorAll('.gallery-item-loading').forEach(el => el.remove());
+      if (gridImages) gridImages.querySelectorAll('.gallery-item-loading').forEach(el => el.remove());
       UI.toast('Greška pri učitavanju galerije: ' + e.message, 'error');
     }
   }
@@ -430,7 +499,7 @@ const App = (function () {
     const emptyEl = document.getElementById('gallery-empty');
     const loadMoreEl = document.getElementById('gallery-load-more');
 
-    let currentTab = 'portraits'; // Zadano
+    let currentTab = 'portraits';
     const activeTabBtn = document.querySelector('.gallery-tab-btn.active');
     if (activeTabBtn) currentTab = activeTabBtn.dataset.tab;
 
@@ -446,45 +515,30 @@ const App = (function () {
     }
 
     if (currentTab === 'portraits') {
-      // 2. Optimizacija: re-renderaj portrete samo ako se pretraga promijenila ili grid još nije napunjen
       if (_portraitsGridPopulated && _lastPortraitsQuery === query) {
         const count = gridPortraits.querySelectorAll('.portrait-gallery-item').length;
         const countEl = document.getElementById('gallery-count');
         if (countEl) countEl.textContent = `${count} portreta`;
         if (emptyEl) emptyEl.style.display = count === 0 ? '' : 'none';
-        if (loadMoreEl) loadMoreEl.style.display = 'none';
+        if (loadMoreEl) loadMoreEl.style.display = _dbHasMore ? '' : 'none';
         return;
       }
 
-      // Očisti samo portraits grid
       if (gridPortraits) gridPortraits.innerHTML = '';
 
-      const allTags = DB.getAllTags();
-      const portraitTags = allTags.filter(t => t.person_id);
-
-      const filteredTags = portraitTags.filter(t => {
-        const p = DB.getPersonById(t.person_id);
-        if (!p) return false;
-        const name = `${p.ime || ''} ${p.prezime || ''}`.toLowerCase();
-        const note = (p.napomena || '').toLowerCase();
-        
-        if (!query) return true;
-        return name.includes(query) || note.includes(query);
-      });
-
       const countEl = document.getElementById('gallery-count');
-      if (countEl) countEl.textContent = `${filteredTags.length} portreta`;
+      if (countEl) countEl.textContent = `${_portraitsList.length} portreta`;
 
-      if (filteredTags.length === 0) {
+      if (_portraitsList.length === 0) {
         if (emptyEl) emptyEl.style.display = '';
         if (loadMoreEl) loadMoreEl.style.display = 'none';
       } else {
         if (emptyEl) emptyEl.style.display = 'none';
-        if (loadMoreEl) loadMoreEl.style.display = 'none';
+        if (loadMoreEl) loadMoreEl.style.display = _dbHasMore ? '' : 'none';
 
-        filteredTags.forEach(tag => {
-          const person = DB.getPersonById(tag.person_id);
-          if (person && gridPortraits) {
+        _portraitsList.forEach(tag => {
+          const person = tag.person_id ? DB.getPersonById(tag.person_id) : null;
+          if (gridPortraits) {
             gridPortraits.appendChild(createPortraitItem(tag, person));
           }
         });
@@ -498,53 +552,35 @@ const App = (function () {
     // Tab "Slike" (Fotografije)
     const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
 
-    // 3. Optimizacija: re-renderaj slike samo ako se pretraga, pod-tab ili broj datoteka promijenio
-    if (_imagesGridPopulated && _lastImagesQuery === query && _lastImagesSubtab === subtab && _lastImagesFilesLength === _galleryFiles.length) {
+    const isDbImagesTab = (_userRole === 'visitor' || subtab === 'tagged');
+    const imagesCount = isDbImagesTab ? _imagesList.length : _galleryFiles.length;
+
+    if (_imagesGridPopulated && _lastImagesQuery === query && _lastImagesSubtab === subtab && _lastImagesFilesLength === imagesCount) {
       const count = gridImages.querySelectorAll('.gallery-item').length;
       const countEl = document.getElementById('gallery-count');
       if (countEl) countEl.textContent = `${count} slika`;
       if (emptyEl) emptyEl.style.display = count === 0 ? '' : 'none';
       if (loadMoreEl) {
-        loadMoreEl.style.display = (_galleryNextPageToken && _authStatus?.driveConnected && subtab !== 'tagged') ? '' : 'none';
+        loadMoreEl.style.display = isDbImagesTab ? (_dbHasMore ? '' : 'none') : (_galleryNextPageToken ? '' : 'none');
       }
       return;
     }
 
-    // Očisti samo images grid
     if (gridImages) gridImages.innerHTML = '';
 
     let filesToRender = [];
 
-    if (_userRole === 'visitor') {
-      const images = DB.getAllImages();
-      filesToRender = images
-        .filter(img => img.output_drive_id && DB.getTagsByImageId(img.id).length > 0)
-        .map(img => {
-          const ext = img.original_filename.split('.').pop() || 'jpg';
-          return {
-            id: img.output_drive_id,
-            name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
-            mimeType: 'image/jpeg'
-          };
-        });
+    if (isDbImagesTab) {
+      filesToRender = _imagesList;
     } else {
+      // Admin: all ili untagged iz Google Drivea
       const dbImages = DB.getAllImages();
       const dbOriginalIds = dbImages.filter(img => img.output_drive_id).map(img => img.original_drive_id);
 
       if (subtab === 'untagged') {
         filesToRender = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
-      } else if (subtab === 'tagged') {
-        filesToRender = dbImages
-          .filter(img => img.output_drive_id)
-          .map(img => {
-            const ext = img.original_filename.split('.').pop() || 'jpg';
-            return {
-              id: img.output_drive_id,
-              name: `Antunovac-u-slici-${String(img.sequence_no).padStart(4, '0')}.${ext}`,
-              mimeType: 'image/jpeg'
-            };
-          });
       } else {
+        // all
         const untagged = _galleryFiles.filter(file => !dbOriginalIds.includes(file.id));
         const tagged = dbImages
           .filter(img => img.output_drive_id)
@@ -558,24 +594,25 @@ const App = (function () {
           });
         filesToRender = [...untagged, ...tagged];
       }
-    }
 
-    filesToRender = filesToRender.filter(file => {
-      const imageRec = DB.getImageByDriveId(file.id);
-      const tags = imageRec ? DB.getTagsByImageId(imageRec.id) : [];
+      // Filtriranje na klijentskoj strani za Google Drive datoteke
+      filesToRender = filesToRender.filter(file => {
+        const imageRec = DB.getImageByDriveId(file.id);
+        const tags = imageRec ? DB.getTagsByImageId(imageRec.id) : [];
 
-      if (!query) return true;
+        if (!query) return true;
 
-      const matchName = file.name.toLowerCase().includes(query);
-      const matchDonor = imageRec && imageRec.donor && imageRec.donor.toLowerCase().includes(query);
-      const matchPerson = tags.some(t => {
-        const p = DB.getPersonById(t.person_id);
-        if (!p) return false;
-        return `${p.ime || ''} ${p.prezime || ''}`.toLowerCase().includes(query);
+        const matchName = file.name.toLowerCase().includes(query);
+        const matchDonor = imageRec && imageRec.donor && imageRec.donor.toLowerCase().includes(query);
+        const matchPerson = tags.some(t => {
+          const ime = (t.person_ime || '').toLowerCase();
+          const prezime = (t.person_prezime || '').toLowerCase();
+          return `${ime} ${prezime}`.includes(query);
+        });
+
+        return matchName || matchDonor || matchPerson;
       });
-
-      return matchName || matchDonor || matchPerson;
-    });
+    }
 
     const countEl = document.getElementById('gallery-count');
     if (countEl) countEl.textContent = `${filesToRender.length} slika`;
@@ -591,12 +628,12 @@ const App = (function () {
     }
 
     if (loadMoreEl) {
-      loadMoreEl.style.display = (_galleryNextPageToken && _authStatus?.driveConnected && subtab !== 'tagged') ? '' : 'none';
+      loadMoreEl.style.display = isDbImagesTab ? (_dbHasMore ? '' : 'none') : (_galleryNextPageToken ? '' : 'none');
     }
 
     _lastImagesQuery = query;
     _lastImagesSubtab = subtab;
-    _lastImagesFilesLength = _galleryFiles.length;
+    _lastImagesFilesLength = filesToRender.length;
     _imagesGridPopulated = true;
   }
 
@@ -1235,13 +1272,40 @@ const App = (function () {
     // Paginacija galerije
     document.getElementById('btn-load-more')?.addEventListener('click', () => {
       const settings = DB.getSettings();
-      if (settings.inputFolderId && _galleryNextPageToken) loadGallery(settings.inputFolderId, true);
+      const currentTab = document.querySelector('.gallery-tab-btn.active')?.dataset.tab || 'portraits';
+      const subtab = document.querySelector('#gallery-subtabs .active')?.dataset.subtab || 'untagged';
+
+      if (currentTab === 'portraits' || _userRole === 'visitor' || subtab === 'tagged') {
+        loadGallery(settings.inputFolderId, true);
+      } else {
+        if (settings.inputFolderId && _galleryNextPageToken) {
+          loadGallery(settings.inputFolderId, true);
+        }
+      }
+    });
+
+    // Infinite Scroll (Automatsko učitavanje kad skrolamo do dna)
+    let scrollTimeout;
+    window.addEventListener('scroll', () => {
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        const loadMoreBtn = document.getElementById('btn-load-more');
+        const loadMoreContainer = document.getElementById('gallery-load-more');
+        if (loadMoreBtn && loadMoreContainer && loadMoreContainer.style.display !== 'none') {
+          const rect = loadMoreContainer.getBoundingClientRect();
+          if (rect.top <= window.innerHeight + 300) {
+            console.log('[App] Infinite Scroll: Učitavanje sljedeće stranice...');
+            loadMoreBtn.click();
+          }
+        }
+      }, 100);
     });
 
     // Search input u galeriji
     document.getElementById('gallery-search-input')?.addEventListener('input', UI.debounce((e) => {
-       renderCurrentGallery();
-    }, 300));
+       const settings = DB.getSettings();
+       loadGallery(settings.inputFolderId);
+    }, 400));
 
     // Gallery tabs
     document.querySelectorAll('.gallery-tab-btn').forEach(btn => {
@@ -1256,7 +1320,8 @@ const App = (function () {
           subtabs.style.display = (currentTab === 'images' && _userRole === 'admin') ? 'flex' : 'none';
         }
 
-        renderCurrentGallery();
+        const settings = DB.getSettings();
+        loadGallery(settings.inputFolderId);
       });
     });
 
@@ -1265,7 +1330,8 @@ const App = (function () {
       btn.addEventListener('click', () => {
         document.querySelectorAll('#gallery-subtabs button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        renderCurrentGallery();
+        const settings = DB.getSettings();
+        loadGallery(settings.inputFolderId);
       });
     });
 
