@@ -6,6 +6,7 @@ const dbFile = path.join(__dirname, '..', 'data', 'db.json');
 
 let db = null;
 let enabled = false;
+let projectId = '';
 
 // Inicijalizacija Firebase Admin SDK-a
 try {
@@ -18,7 +19,7 @@ try {
       try {
         serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8'));
       } catch (err) {
-        console.warn('[Firebase] FIREBASE_SERVICE_ACCOUNT nije valjan JSON ili Base64 JSON.');
+        console.warn('[Firebase] FIREBASE_SERVICE_ACCOUNT nije valjan JSON ili Base64 JSON:', err.message);
       }
     }
   } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
@@ -35,7 +36,8 @@ try {
     });
     db = admin.firestore();
     enabled = true;
-    console.log('[Firebase] Uspješno inicijaliziran Firestore za projekt:', serviceAccount.projectId);
+    projectId = serviceAccount.project_id || serviceAccount.projectId || '';
+    console.log('[Firebase] Uspješno inicijaliziran Firestore za projekt:', projectId);
   } else {
     console.log('[Firebase] Firebase varijable nisu postavljene. Koristi se lokalni fallback (data/db.json).');
   }
@@ -46,6 +48,10 @@ try {
 
 function isEnabled() {
   return enabled;
+}
+
+function getProjectId() {
+  return projectId;
 }
 
 // Lokalni fallback čitač i pisač
@@ -166,6 +172,7 @@ async function loadAll() {
 module.exports = {
   db,
   isEnabled,
+  getProjectId,
   saveDoc,
   deleteDoc,
   loadAll,

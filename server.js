@@ -85,7 +85,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 Server pokrenut na http://localhost:${PORT}`);
   console.log(`   Okolina: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   Firebase projekt: ${process.env.FIREBASE_PROJECT_ID || '(nije konfiguriran)'}\n`);
+  console.log(`   Firebase projekt: ${firebaseDb.isEnabled() ? firebaseDb.getProjectId() : '(nije konfiguriran)'}\n`);
 });
 
 module.exports = app;
