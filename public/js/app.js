@@ -137,21 +137,39 @@ const App = (function () {
     const navExport = document.getElementById('nav-export')?.parentElement;
     const navSettings = document.getElementById('nav-settings')?.parentElement;
 
-    if (_userRole === 'visitor' && !_authStatus?.authenticated) {
+    const isVisitor = _userRole === 'visitor' && !_authStatus?.authenticated;
+
+    if (isVisitor) {
       if (navEditor) navEditor.style.display = 'none';
       if (navPersons) navPersons.style.display = 'none';
       if (navComments) navComments.style.display = 'none';
       if (navExport) navExport.style.display = 'none';
       if (navSettings) navSettings.style.display = 'none';
+
+      // Sakrij gumb za postavke u galeriji i prilagodi tekst za posjetitelje
+      const btnGoSettings = document.getElementById('btn-go-settings');
+      if (btnGoSettings) btnGoSettings.style.display = 'none';
+      const emptyText = document.querySelector('#gallery-empty p');
+      if (emptyText) emptyText.textContent = 'U galeriji trenutno nema označenih arhivskih fotografija.';
+      const emptyHint = document.querySelector('#gallery-empty .text-muted');
+      if (emptyHint) emptyHint.style.display = 'none';
       
       const hash = window.location.hash.replace('#', '');
-      if (hash !== 'gallery') UI.showView('gallery');
+      if (['settings', 'export', 'editor'].includes(hash)) UI.showView('gallery');
     } else {
       if (navEditor) navEditor.style.display = '';
       if (navPersons) navPersons.style.display = '';
       if (navComments) navComments.style.display = '';
       if (navExport) navExport.style.display = '';
       if (navSettings) navSettings.style.display = '';
+
+      // Prikaži kontrole za admina
+      const btnGoSettings = document.getElementById('btn-go-settings');
+      if (btnGoSettings) btnGoSettings.style.display = '';
+      const emptyText = document.querySelector('#gallery-empty p');
+      if (emptyText) emptyText.textContent = 'Nema fotografija u odabranoj mapi.';
+      const emptyHint = document.querySelector('#gallery-empty .text-muted');
+      if (emptyHint) emptyHint.style.display = '';
     }
 
     if (typeof Comments !== 'undefined') {
@@ -1037,6 +1055,24 @@ const App = (function () {
   // ─── Event binding ─────────────────────────────────────────────────────────
 
   function bindEvents() {
+    // Preusmjeravanje posjetitelja ako pokušaju ući u zabranjene poglede
+    document.addEventListener('viewChanged', (e) => {
+      const view = e.detail.view;
+      const isVisitor = _userRole === 'visitor' && !_authStatus?.authenticated;
+      if (isVisitor && ['settings', 'export', 'editor'].includes(view)) {
+         UI.showView('gallery');
+      }
+    });
+
+    // Kada se učita najnovija zajednička baza sa servera
+    document.addEventListener('dbSynced', () => {
+      applySettings(DB.getSettings());
+      const settings = DB.getSettings();
+      if (_userRole === 'visitor' || settings.inputFolderId) {
+        loadGallery(settings.inputFolderId);
+      }
+    });
+
     // Klik na gumb sa slikom lokota (Prijava)
     document.getElementById('nav-btn-lock')?.addEventListener('click', () => {
       if (_userRole === 'admin') {

@@ -248,7 +248,15 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
   try {
     const drive = await getDriveClient(req.session);
     const { id } = req.params;
-    const { x, y, width, height, mimeType } = req.body;
+    const { x, y, width, height } = req.body;
+
+    // Dohvati metapodatke o datoteci radi točnog formata (mimeType)
+    const fileMetadata = await drive.files.get({
+      fileId: id,
+      fields: 'name, mimeType'
+    });
+    const originalMimeType = fileMetadata.data.mimeType || 'image/jpeg';
+    console.log(`[Crop] Datoteka: ${fileMetadata.data.name}, originalni MIME tip: ${originalMimeType}`);
 
     const fileResponse = await drive.files.get(
       { fileId: id, alt: 'media' },
@@ -268,6 +276,8 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
         const img = sharp(rotatedBuffer);
         const meta = await img.metadata();
         
+        console.log(`[Crop] Originalna veličina slike: ${meta.width}x${meta.height}, format: ${meta.format}`);
+        
         const px = Math.round((x / 100) * meta.width);
         const py = Math.round((y / 100) * meta.height);
         const pw = Math.round((width / 100) * meta.width);
@@ -278,20 +288,27 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
         const cropW = Math.max(1, Math.min(pw, meta.width - cropX));
         const cropH = Math.max(1, Math.min(ph, meta.height - cropY));
 
+        console.log(`[Crop] Izrezivanje regije: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
+
         let processed = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
 
-        if (mimeType && (mimeType.includes('tiff') || mimeType.includes('tif'))) {
+        if (originalMimeType && (originalMimeType.includes('tiff') || originalMimeType.includes('tif'))) {
           processed = processed.tiff({
             compression: 'none',
             quality: 100,
             xres: 300,
             yres: 300
           });
-        } else if (mimeType && mimeType.includes('png')) {
+        } else if (originalMimeType && originalMimeType.includes('png')) {
           processed = processed.png({
             compressionLevel: 0,
             xres: 300,
             yres: 300
+          });
+        } else if (originalMimeType && originalMimeType.includes('webp')) {
+          processed = processed.webp({
+            quality: 100,
+            lossless: true
           });
         } else {
           processed = processed.jpeg({
@@ -303,8 +320,10 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
         }
 
         const outBuffer = await processed.toBuffer();
+        console.log(`[Crop] Izrezano uspješno, veličina izlaznog međuspremnika: ${outBuffer.length} bajtova`);
+
         res.set({
-          'Content-Type': mimeType || 'image/jpeg',
+          'Content-Type': originalMimeType,
           'Content-Length': outBuffer.length
         });
         res.send(outBuffer);
@@ -571,5 +590,133 @@ async function resolveFilenameConflict(drive, folderId, desiredFilename) {
   // Fallback: dodaj timestamp
   return `${nameWithoutExt}_${Date.now()}${ext}`;
 }
+
+const fs = require('fs');
+const path = require('path');
+const dbFile = path.join(__dirname, '..', 'data', 'db.json');
+
+// ─── GET /api/drive/db/load ──────────────────────────────────────────────────
+// Učitava bazu podataka s Google Drive-a ili iz lokalnog cache-a
+router.get('/db/load', async (req, res) => {
+  try {
+    // 1. Ako postoji lokalni cache, vrati ga odmah
+    if (fs.existsSync(dbFile)) {
+      const data = fs.readFileSync(dbFile, 'utf8');
+      return res.json(JSON.parse(data));
+    }
+
+    // 2. Ako ne postoji lokalni cache, probaj skinuti s Google Drive-a
+    let drive;
+    try {
+      drive = await getDriveClient(req.session);
+    } catch {
+      // Nema Google Drive sesije (korisnik je posjetitelj i još se nitko nije spojio)
+      return res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
+    }
+
+    // Pretraži Google Drive za naziv datoteke 'antunovac_db.json'
+    const filesResponse = await drive.files.list({
+      q: "name = 'antunovac_db.json' and trashed = false",
+      fields: 'files(id, name)',
+      pageSize: 1
+    });
+
+    const files = filesResponse.data.files || [];
+    if (files.length > 0) {
+      const fileId = files[0].id;
+      const downloadResponse = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'text' }
+      );
+      
+      let dbData = downloadResponse.data;
+      if (typeof dbData === 'string') {
+        try { dbData = JSON.parse(dbData); } catch {}
+      }
+      
+      // Spremi lokalno
+      const dataDir = path.dirname(dbFile);
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
+
+      return res.json(dbData);
+    }
+
+    // 3. Ako nigdje ne postoji, vrati praznu bazu
+    res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
+  } catch (err) {
+    console.error('[DB-Load] Greška:', err.message);
+    res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
+  }
+});
+
+// ─── POST /api/drive/db/save ─────────────────────────────────────────────────
+// Sprema bazu podataka lokalno i sinkronizira je na Google Drive u pozadini
+router.post('/db/save', express.json({ limit: '10mb' }), async (req, res) => {
+  try {
+    const dbData = req.body;
+    if (!dbData) return res.status(400).json({ error: 'Nedostaje sadržaj baze.' });
+
+    // 1. Spremi lokalno na disk (brzi cache)
+    const dataDir = path.dirname(dbFile);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
+
+    // Odgovori klijentu odmah
+    res.json({ success: true, message: 'Baza spremljena lokalno.' });
+
+    // 2. Sinkroniziraj na Google Drive asinkrono u pozadini
+    const outputFolderId = dbData.settings?.outputFolderId;
+    if (!outputFolderId) return;
+
+    (async () => {
+      try {
+        const drive = await getDriveClient(req.session);
+        
+        // Nađi postojeću antunovac_db.json u output mapi
+        const searchResponse = await drive.files.list({
+          q: `name = 'antunovac_db.json' and '${outputFolderId}' in parents and trashed = false`,
+          fields: 'files(id, name)',
+          pageSize: 1
+        });
+
+        const files = searchResponse.data.files || [];
+        const { Readable } = require('stream');
+        const stream = Readable.from(JSON.stringify(dbData, null, 2));
+
+        if (files.length > 0) {
+          // Ažuriraj postojeću
+          await drive.files.update({
+            fileId: files[0].id,
+            media: {
+              mimeType: 'application/json',
+              body: stream
+            }
+          });
+          console.log('[DB-Save] Baza antunovac_db.json uspješno ažurirana na Google Drive-u.');
+        } else {
+          // Kreiraj novu
+          await drive.files.create({
+            requestBody: {
+              name: 'antunovac_db.json',
+              parents: [outputFolderId]
+            },
+            media: {
+              mimeType: 'application/json',
+              body: stream
+            }
+          });
+          console.log('[DB-Save] Nova baza antunovac_db.json uspješno kreirana na Google Drive-u.');
+        }
+      } catch (err) {
+        console.error('[DB-Save-Background] Greška pri sinkronizaciji na Drive:', err.message);
+      }
+    })();
+
+  } catch (err) {
+    console.error('[DB-Save] Greška:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

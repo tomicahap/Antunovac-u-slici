@@ -7,6 +7,11 @@ const Comments = (function () {
     
     // Učitaj komentare na pokretu
     renderCommentsList();
+
+    // Re-render when database is synced from server
+    document.addEventListener('dbSynced', () => {
+      renderCommentsList();
+    });
   }
 
   function setRole(role) {

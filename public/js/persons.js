@@ -380,6 +380,11 @@ const Persons = (function () {
   // ─── Init ─────────────────────────────────────────────────────────────────
 
   function init() {
+    // Re-render when database is synced from server
+    document.addEventListener('dbSynced', () => {
+      renderPersonsGrid();
+    });
+
     // Autocomplete u tag formi
     initAutocomplete('tag-autocomplete', 'tag-autocomplete-dropdown', fillTagFormWithPerson);
 

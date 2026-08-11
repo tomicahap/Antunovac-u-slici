@@ -102,6 +102,39 @@ router.get('/callback', async (req, res) => {
           JSON.stringify(global.adminSession, null, 2)
         );
         console.log('[Auth] Admin sesija spremljena na disk za posjetitelje.');
+
+        // Pozadinsko preuzimanje baze s Google Drive-a ako postoji
+        (async () => {
+          try {
+            const { getDriveClient } = require('../utils/driveClient');
+            const drive = await getDriveClient(req.session);
+            const filesResponse = await drive.files.list({
+              q: "name = 'antunovac_db.json' and trashed = false",
+              fields: 'files(id, name)',
+              pageSize: 1
+            });
+
+            const files = filesResponse.data.files || [];
+            if (files.length > 0) {
+              const fileId = files[0].id;
+              const downloadResponse = await drive.files.get(
+                { fileId, alt: 'media' },
+                { responseType: 'text' }
+              );
+              
+              let dbData = downloadResponse.data;
+              if (typeof dbData === 'string') {
+                try { dbData = JSON.parse(dbData); } catch {}
+              }
+              
+              const dbFile = path.join(dataDir, 'db.json');
+              fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
+              console.log('[Auth] Baza antunovac_db.json preuzeta i spremljena lokalno nakon prijave.');
+            }
+          } catch (err) {
+            console.error('[Auth-DB-Download] Greška pri dohvaćanju baze s Drive-a:', err.message);
+          }
+        })();
       } catch (e) {
         console.error('[Auth] Greška pri spremanju admin sesije na disk:', e.message);
       }

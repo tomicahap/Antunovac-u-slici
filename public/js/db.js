@@ -129,10 +129,29 @@ const DB = (function () {
     _data.comments = (await idbGet(KEYS.comments)) || lsGet(KEYS.comments) || [];
   }
 
+  let _saveTimeout = null;
+  function debounceSaveToServer() {
+    if (_saveTimeout) clearTimeout(_saveTimeout);
+    _saveTimeout = setTimeout(async () => {
+      try {
+        await fetch('/api/drive/db/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(_data)
+        });
+      } catch (err) {
+        console.error('[DB] Greška pri sinkronizaciji baze na server:', err);
+      }
+    }, 1000);
+  }
+
   async function saveToStorage(collection) {
     const val = _data[collection];
     await idbSet(KEYS[collection], val);
     lsSet(KEYS[collection], val);
+    
+    // Sinkroniziraj cijelu bazu na server
+    debounceSaveToServer();
   }
 
   // ─── Sync Queue ────────────────────────────────────────────────────────────
@@ -559,27 +578,31 @@ const DB = (function () {
     emitSyncStatus('syncing');
 
     try {
-      const [personsSnap, tagsSnap, imagesSnap] = await Promise.all([
+      const [personsSnap, tagsSnap, imagesSnap, commentsSnap] = await Promise.all([
         _db.collection('persons').get(),
         _db.collection('tags').get(),
-        _db.collection('images').get()
+        _db.collection('images').get(),
+        _db.collection('comments').get()
       ]);
 
       const personsRemote = personsSnap.docs.map(d => d.data());
       const tagsRemote    = tagsSnap.docs.map(d => d.data());
       const imagesRemote  = imagesSnap.docs.map(d => d.data());
+      const commentsRemote = commentsSnap.docs.map(d => d.data());
 
       // Merge: remote pobjeđuje ako je noviji
       _data.persons = mergeCollections(_data.persons, personsRemote);
       _data.tags    = mergeCollections(_data.tags, tagsRemote);
       _data.images  = mergeCollections(_data.images, imagesRemote);
+      _data.comments = mergeCollections(_data.comments, commentsRemote);
 
       saveToStorage('persons');
       saveToStorage('tags');
       saveToStorage('images');
+      saveToStorage('comments');
 
       emitSyncStatus('connected');
-      console.log(`[DB] Povučeno iz Firestorea: ${personsRemote.length} osoba, ${tagsRemote.length} tagova, ${imagesRemote.length} slika`);
+      console.log(`[DB] Povučeno iz Firestorea: ${personsRemote.length} osoba, ${tagsRemote.length} tagova, ${imagesRemote.length} slika, ${commentsRemote.length} komentara`);
       return true;
     } catch (e) {
       console.error('[DB] Pull greška:', e.message);
@@ -691,6 +714,36 @@ const DB = (function () {
     if (!navigator.onLine) {
       emitSyncStatus('offline');
     }
+
+    // Učitaj najnovije zajedničke podatke sa servera
+    fetch('/api/drive/db/load')
+      .then(res => res.json())
+      .then(async (remoteData) => {
+        if (remoteData && remoteData.persons) {
+          _data.persons = remoteData.persons || [];
+          _data.tags = remoteData.tags || [];
+          _data.images = remoteData.images || [];
+          _data.comments = remoteData.comments || [];
+          _data.settings = remoteData.settings || {};
+
+          await idbSet(KEYS.persons, _data.persons);
+          await idbSet(KEYS.tags, _data.tags);
+          await idbSet(KEYS.images, _data.images);
+          await idbSet(KEYS.comments, _data.comments);
+          await idbSet(KEYS.settings, _data.settings);
+
+          lsSet(KEYS.persons, _data.persons);
+          lsSet(KEYS.tags, _data.tags);
+          lsSet(KEYS.images, _data.images);
+          lsSet(KEYS.comments, _data.comments);
+          lsSet(KEYS.settings, _data.settings);
+
+          console.log('[DB] Baza uspješno sinkronizirana sa serverom.');
+          document.dispatchEvent(new CustomEvent('dbSynced'));
+        }
+      })
+      .catch(err => console.error('[DB] Učitavanje baze sa servera neuspješno:', err));
+
     return _data;
   }
 
