@@ -213,29 +213,20 @@ const DB = (function () {
 
   // ─── Firestore inicijalizacija ─────────────────────────────────────────────
   async function initFirestore(config) {
-    if (!config || !config.projectId) {
+    if (!config || !config.enabled) {
       _firestoreEnabled = false;
       emitSyncStatus('disabled');
       return false;
     }
 
     try {
-      // Firebase je već učitan via CDN script tag
-      if (!firebase.apps.length) {
-        firebase.initializeApp(config);
-      }
-      _db = firebase.firestore();
       _firestoreEnabled = true;
-
-      // Provjera veze
-      await _db.enableNetwork();
       emitSyncStatus('connected');
 
-      // Slušaj online/offline događaje
       window.addEventListener('online', onOnline);
       window.addEventListener('offline', onOffline);
 
-      console.log('[DB] Firestore spojen:', config.projectId);
+      console.log('[DB] Firestore uspješno inicijaliziran na backendu za projekt:', config.projectId);
       return true;
     } catch (e) {
       console.error('[DB] Firestore init greška:', e.message);
