@@ -1141,6 +1141,50 @@ const App = (function () {
     if (gallerySubtitle && settings.inputFolderName) gallerySubtitle.textContent = settings.inputFolderName;
   }
 
+  function populateDbMgmtSelects() {
+    const personSelect = document.getElementById('select-db-delete-person');
+    const tagSelect = document.getElementById('select-db-delete-tag');
+    const imageSelect = document.getElementById('select-db-delete-image');
+
+    if (personSelect) {
+      personSelect.innerHTML = '<option value="">-- Odaberi osobu za brisanje --</option>';
+      const persons = DB.getAllPersons();
+      persons.sort((a, b) => `${a.ime || ''} ${a.prezime || ''}`.localeCompare(`${b.ime || ''} ${b.prezime || ''}`));
+      persons.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        const birthStr = p.godina_rodenja ? p.godina_rodenja : '?';
+        const deathStr = p.godina_smrti ? p.godina_smrti : '?';
+        option.textContent = `${p.ime || ''} ${p.prezime || ''} (${birthStr} - ${deathStr})`;
+        personSelect.appendChild(option);
+      });
+    }
+
+    if (tagSelect) {
+      tagSelect.innerHTML = '<option value="">-- Odaberi oznaku za brisanje --</option>';
+      const tags = DB.getAllTags();
+      tags.forEach(t => {
+        const option = document.createElement('option');
+        option.value = t.id;
+        const name = `${t.person_ime || ''} ${t.person_prezime || ''}`.trim() || 'Nepoznata osoba';
+        option.textContent = `${name} [Tag ID: ${t.id.substring(0, 8)}]`;
+        tagSelect.appendChild(option);
+      });
+    }
+
+    if (imageSelect) {
+      imageSelect.innerHTML = '<option value="">-- Odaberi slikovni zapis za brisanje --</option>';
+      const images = DB.getAllImages();
+      images.sort((a, b) => (b.sequence_no || 0) - (a.sequence_no || 0));
+      images.forEach(img => {
+        const option = document.createElement('option');
+        option.value = img.id;
+        option.textContent = `Antunovac-u-slici-${String(img.sequence_no || 0).padStart(4, '0')} (${img.original_filename})`;
+        imageSelect.appendChild(option);
+      });
+    }
+  }
+
   function saveSettings() {
     let startFolderRaw = document.getElementById('default-start-folder')?.value.trim() || 'root';
     // Ekstrahiraj ID ako je proslijeđen URL
@@ -1161,12 +1205,13 @@ const App = (function () {
   // ─── Event binding ─────────────────────────────────────────────────────────
 
   function bindEvents() {
-    // Preusmjeravanje posjetitelja ako pokušaju ući u zabranjene poglede
     document.addEventListener('viewChanged', (e) => {
       const view = e.detail.view;
       const isVisitor = _userRole === 'visitor' && !_authStatus?.authenticated;
       if (isVisitor && ['settings', 'export', 'editor'].includes(view)) {
          UI.showView('gallery');
+      } else if (view === 'settings') {
+         populateDbMgmtSelects();
       }
     });
 
@@ -1422,6 +1467,86 @@ const App = (function () {
     document.addEventListener('viewChanged', (e) => {
       if (e.detail.view === 'persons') Persons.renderPersonsGrid();
       if (e.detail.view === 'comments') Comments.renderCommentsList();
+    });
+
+    // Upravljanje bazom podataka - Pojedinačno brisanje
+    document.getElementById('btn-db-delete-person')?.addEventListener('click', () => {
+      const id = document.getElementById('select-db-delete-person')?.value;
+      if (!id) { UI.toast('Odaberite osobu za brisanje.', 'warning'); return; }
+      if (confirm('Jeste li sigurni da želite obrisati ovu osobu iz baze? Ova akcija ne briše datoteke na Driveu.')) {
+        DB.deletePerson(id);
+        UI.toast('Osoba obrisana iz baze.', 'success');
+        populateDbMgmtSelects();
+      }
+    });
+
+    document.getElementById('btn-db-delete-tag')?.addEventListener('click', () => {
+      const id = document.getElementById('select-db-delete-tag')?.value;
+      if (!id) { UI.toast('Odaberite oznaku za brisanje.', 'warning'); return; }
+      if (confirm('Jeste li sigurni da želite obrisati ovu oznaku iz baze? Ova akcija ne briše datoteke na Driveu.')) {
+        DB.deleteTag(id);
+        UI.toast('Oznaka obrisana iz baze.', 'success');
+        populateDbMgmtSelects();
+      }
+    });
+
+    document.getElementById('btn-db-delete-image')?.addEventListener('click', () => {
+      const id = document.getElementById('select-db-delete-image')?.value;
+      if (!id) { UI.toast('Odaberite sliku za brisanje.', 'warning'); return; }
+      if (confirm('Jeste li sigurni da želite obrisati ovaj slikovni zapis iz baze? Ova akcija ne briše sliku na Driveu.')) {
+        DB.deleteImage(id);
+        UI.toast('Slikovni zapis obrisan iz baze.', 'success');
+        populateDbMgmtSelects();
+        const settings = DB.getSettings();
+        loadGallery(settings.inputFolderId);
+      }
+    });
+
+    // Upravljanje bazom podataka - Grupno brisanje
+    document.getElementById('btn-clear-db-all')?.addEventListener('click', async () => {
+      if (confirm('PAŽNJA: Jeste li sigurni da želite obrisati CIJELU BAZU PODATAKA? Ovo će obrisati sve osobe, oznake, slike i komentare iz baze. Datoteke na disku neće biti izbrisane.')) {
+        if (confirm('Molimo potvrdite još jednom. Želite li stvarno obrisati cijelu bazu?')) {
+          await DB.clearCollection('all');
+          UI.toast('Cijela baza podataka je obrisana.', 'success');
+          populateDbMgmtSelects();
+          const settings = DB.getSettings();
+          loadGallery(settings.inputFolderId);
+        }
+      }
+    });
+
+    document.getElementById('btn-clear-db-persons')?.addEventListener('click', async () => {
+      if (confirm('Jeste li sigurni da želite obrisati sve osobe iz baze?')) {
+        await DB.clearCollection('persons');
+        UI.toast('Sve osobe obrisane iz baze.', 'success');
+        populateDbMgmtSelects();
+      }
+    });
+
+    document.getElementById('btn-clear-db-tags')?.addEventListener('click', async () => {
+      if (confirm('Jeste li sigurni da želite obrisati sve oznake i portrete iz baze?')) {
+        await DB.clearCollection('tags');
+        UI.toast('Sve oznake obrisane iz baze.', 'success');
+        populateDbMgmtSelects();
+      }
+    });
+
+    document.getElementById('btn-clear-db-images')?.addEventListener('click', async () => {
+      if (confirm('Jeste li sigurni da želite obrisati sve zapise slika iz baze?')) {
+        await DB.clearCollection('images');
+        UI.toast('Svi slikovni zapisi obrisani iz baze.', 'success');
+        populateDbMgmtSelects();
+        const settings = DB.getSettings();
+        loadGallery(settings.inputFolderId);
+      }
+    });
+
+    document.getElementById('btn-clear-db-comments')?.addEventListener('click', async () => {
+      if (confirm('Jeste li sigurni da želite obrisati sve komentare iz baze?')) {
+        await DB.clearCollection('comments');
+        UI.toast('Svi komentari obrisani iz baze.', 'success');
+        populateDbMgmtSelects();
+      }
     });
   }
 

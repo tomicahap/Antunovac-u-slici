@@ -136,6 +136,54 @@ async function deleteDoc(collectionName, docId) {
   }
 }
 
+// Brisanje cijele kolekcije
+async function clearCollection(collectionName) {
+  cacheData = null; // Invalidiraj keš
+  if (enabled && db) {
+    try {
+      console.log(`[Firebase] Brisanje kolekcije: ${collectionName}...`);
+      if (collectionName === 'all') {
+        const collections = ['persons', 'tags', 'images', 'comments'];
+        for (const col of collections) {
+          const ref = db.collection(col);
+          const snap = await ref.get();
+          const batch = db.batch();
+          snap.forEach(doc => batch.delete(doc.ref));
+          await batch.commit();
+        }
+        console.log(`[Firebase] Uspješno obrisana cijela baza podataka.`);
+      } else {
+        const ref = db.collection(collectionName);
+        const snap = await ref.get();
+        const batch = db.batch();
+        snap.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        await batch.commit();
+        console.log(`[Firebase] Uspješno obrisana kolekcija: ${collectionName}`);
+      }
+      return true;
+    } catch (err) {
+      console.error(`[Firebase] Greška pri brisanju kolekcije ${collectionName}:`, err.message);
+      throw err;
+    }
+  } else {
+    // Lokalni fallback
+    const local = readLocalDb();
+    if (collectionName === 'all') {
+      local.persons = [];
+      local.tags = [];
+      local.images = [];
+      local.comments = [];
+    } else if (local[collectionName]) {
+      local[collectionName] = [];
+    }
+    writeLocalDb(local);
+    console.log(`[LocalFallback] Obrisana kolekcija: ${collectionName}`);
+    return true;
+  }
+}
+
 let cacheData = null;
 let cacheTime = 0;
 
@@ -191,6 +239,7 @@ module.exports = {
   getProjectId,
   saveDoc,
   deleteDoc,
+  clearCollection,
   loadAll,
   readLocalDb,
   writeLocalDb

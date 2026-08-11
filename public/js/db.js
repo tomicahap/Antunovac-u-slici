@@ -451,6 +451,13 @@ const DB = (function () {
     return _data.images.find(img => img.original_drive_id === driveId || img.output_drive_id === driveId) || null;
   }
 
+  function deleteImage(id) {
+    _data.images = _data.images.filter(img => img.id !== id);
+    saveToStorage('images');
+    deleteItem('images', id);
+    return true;
+  }
+
   function saveImage(data) {
     const isNew = !data.id;
     const image = {
@@ -496,6 +503,34 @@ const DB = (function () {
     _data.comments = (_data.comments || []).filter(c => c.id !== commentId);
     saveToStorage('comments');
     deleteItem('comments', commentId);
+    return true;
+  }
+
+  async function clearCollection(collection) {
+    if (collection === 'all') {
+      _data.persons = [];
+      _data.tags = [];
+      _data.images = [];
+      _data.comments = [];
+      await saveToStorage('persons');
+      await saveToStorage('tags');
+      await saveToStorage('images');
+      await saveToStorage('comments');
+    } else if (_data[collection]) {
+      _data[collection] = [];
+      await saveToStorage(collection);
+    }
+
+    if (!_autoSync) return true;
+    try {
+      await fetch('/api/drive/db/clear-collection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection })
+      });
+    } catch (e) {
+      console.error(`[DB] Greška pri brisanju kolekcije ${collection}:`, e);
+    }
     return true;
   }
 
@@ -697,9 +732,11 @@ const DB = (function () {
     // Tags
     getAllTags, getTagsByImageId, getTagsByPersonId, saveTag, deleteTag,
     // Images
-    getAllImages, getImageByDriveId, saveImage,
+    getAllImages, getImageByDriveId, saveImage, deleteImage,
     // Comments
     getComments, getAllComments, saveComment, deleteComment,
+    // Clear/Management
+    clearCollection,
     // Sync
     flushQueue, pullFromFirestore, addSyncListener,
     // Import/Export

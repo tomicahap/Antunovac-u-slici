@@ -993,6 +993,22 @@ router.post('/db/delete-item', express.json(), async (req, res) => {
   }
 });
 
+// ─── POST /api/drive/db/clear-collection ─────────────────────────────────────
+// Grupno brisanje cijele kolekcije
+router.post('/db/clear-collection', express.json(), async (req, res) => {
+  try {
+    const { collection } = req.body;
+    if (!collection) {
+      return res.status(400).json({ error: 'Nedostaje naziv kolekcije.' });
+    }
+    await firebaseDb.clearCollection(collection);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DB-ClearCollection] Greška:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/drive/db/save ─────────────────────────────────────────────────
 // Sprema cjelokupnu bazu (zadržano radi kompatibilnosti)
 router.post('/db/save', express.json({ limit: '10mb' }), async (req, res) => {

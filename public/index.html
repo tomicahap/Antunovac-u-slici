@@ -721,6 +721,65 @@
           </div>
         </div>
 
+        <!-- Upravljanje bazom podataka -->
+        <div class="card" id="db-mgmt-card">
+          <div class="card-header">
+            <svg viewBox="0 0 24 24" class="card-icon" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7V4a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3M4 7h16M4 7v4c0 1.66 3.58 3 8 3s8-1.34 8-3V7M12 14v4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h2 class="card-title">Upravljanje bazom podataka</h2>
+          </div>
+          <div style="padding: var(--space-md); display: flex; flex-direction: column; gap: var(--space-md);">
+            <div class="alert alert-warning" style="margin: 0; font-size: 0.85rem; border-left: 4px solid var(--warning); background: rgba(245, 158, 11, 0.1); padding: var(--space-sm); border-radius: var(--radius-sm);">
+              <strong>Upozorenje:</strong> Brisanje zapisa iz baze <strong>neće</strong> obrisati slikovne datoteke na Google Driveu niti na lokalnom disku.
+            </div>
+
+            <!-- Grupno brisanje -->
+            <div style="border-bottom: 1px solid var(--border); padding-bottom: var(--space-md);">
+              <h3 style="font-size: 0.95rem; margin-top: 0; margin-bottom: var(--space-sm); color: var(--text-primary);">Grupno brisanje (Sve zajedno)</h3>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-sm);">
+                <button class="btn btn-outline btn-sm" id="btn-clear-db-all" style="border-color: var(--danger); color: var(--danger);">⚠️ Obriši cijelu bazu</button>
+                <button class="btn btn-outline btn-sm btn-danger-hover" id="btn-clear-db-persons">Obriši sve osobe</button>
+                <button class="btn btn-outline btn-sm btn-danger-hover" id="btn-clear-db-tags">Obriši sve oznake/portrete</button>
+                <button class="btn btn-outline btn-sm btn-danger-hover" id="btn-clear-db-images">Obriši sve slike (meta)</button>
+                <button class="btn btn-outline btn-sm btn-danger-hover" id="btn-clear-db-comments">Obriši sve komentare</button>
+              </div>
+            </div>
+
+            <!-- Pojedinačno brisanje -->
+            <div>
+              <h3 style="font-size: 0.95rem; margin-top: 0; margin-bottom: var(--space-sm); color: var(--text-primary);">Pojedinačno brisanje</h3>
+              
+              <div style="display: flex; flex-direction: column; gap: var(--space-sm);">
+                <!-- Obriši osobu -->
+                <div style="display: flex; gap: var(--space-xs); align-items: center;">
+                  <span style="font-size: 0.85rem; min-width: 100px; color: var(--text-muted);">Osoba:</span>
+                  <select class="form-select select-sm" id="select-db-delete-person" style="flex: 1;">
+                    <option value="">-- Odaberi osobu za brisanje --</option>
+                  </select>
+                  <button class="btn btn-danger btn-sm" id="btn-db-delete-person">Obriši</button>
+                </div>
+
+                <!-- Obriši oznaku / portret -->
+                <div style="display: flex; gap: var(--space-xs); align-items: center;">
+                  <span style="font-size: 0.85rem; min-width: 100px; color: var(--text-muted);">Oznaka/Portret:</span>
+                  <select class="form-select select-sm" id="select-db-delete-tag" style="flex: 1;">
+                    <option value="">-- Odaberi oznaku za brisanje --</option>
+                  </select>
+                  <button class="btn btn-danger btn-sm" id="btn-db-delete-tag">Obriši</button>
+                </div>
+
+                <!-- Obriši sliku -->
+                <div style="display: flex; gap: var(--space-xs); align-items: center;">
+                  <span style="font-size: 0.85rem; min-width: 100px; color: var(--text-muted);">Slika (meta):</span>
+                  <select class="form-select select-sm" id="select-db-delete-image" style="flex: 1;">
+                    <option value="">-- Odaberi slikovni zapis za brisanje --</option>
+                  </select>
+                  <button class="btn btn-danger btn-sm" id="btn-db-delete-image">Obriši</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
