@@ -569,7 +569,7 @@ const Tags = (function () {
               UI.toast(`${UI.formatPersonName(person)} – uspješno povezano.`, 'success');
               
               // Refresh card details
-              CanvasEngine.onTagSelected(tagId);
+              CanvasEngine.selectTag(tagId);
             }
           });
           dropdown.appendChild(item);
@@ -611,7 +611,7 @@ const Tags = (function () {
             if (inputPrezime) inputPrezime.value = '';
             if (clearBtn) clearBtn.style.display = 'none';
             UI.toast('Veza s osobom je uklonjena.', 'info');
-            CanvasEngine.onTagSelected(tagId);
+            CanvasEngine.selectTag(tagId);
           }
         }
       });
