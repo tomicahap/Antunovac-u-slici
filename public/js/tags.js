@@ -300,6 +300,10 @@ const Tags = (function () {
              continue; // Preskačemo jer se ništa nije promijenilo
           }
 
+          const settings = DB.getSettings();
+          const portraitsTisakFolderId = settings.portraitsTisakFolderId || portraitsFolder.folderId;
+          const portraitsWebFolderId = settings.portraitsWebFolderId || portraitsFolder.folderId;
+
           const portraitFilename = buildPortraitFilename(person, meta.name, imageRec.sequence_no || globalImageSequence - 1, tagIndex);
           const fileId = imageRec.output_drive_id || imageRec.original_drive_id || _currentImageId;
 
@@ -310,8 +314,11 @@ const Tags = (function () {
             width: tag.width,
             height: tag.height,
             folderId: portraitsFolder.folderId,
+            portraitsTisakFolderId: portraitsTisakFolderId,
+            portraitsWebFolderId: portraitsWebFolderId,
             filename: portraitFilename,
-            existingFileId: tag.portrait_drive_id || null
+            existingFileId: tag.portrait_drive_id || null,
+            existingTisakFileId: tag.portrait_tisak_drive_id || null
           });
 
           // Ažuriraj tag s Drive ID-em portreta i spremimo trenutno stanje
@@ -319,6 +326,7 @@ const Tags = (function () {
             ...tag,
             portrait_filename: portraitResult.filename,
             portrait_drive_id: portraitResult.fileId,
+            portrait_tisak_drive_id: portraitResult.tisakFileId || null,
             last_processed_x: tag.x,
             last_processed_y: tag.y,
             last_processed_width: tag.width,
@@ -417,28 +425,32 @@ const Tags = (function () {
         const previewInfo = document.getElementById('preview-person-info');
         const familyInfo = document.getElementById('preview-family-info');
         
-        if (tag.person_id) {
-          const p = DB.getPersonById(tag.person_id);
-          if (p) {
-            if (inputIme) inputIme.value = p.ime || '';
-            if (inputPrezime) inputPrezime.value = p.prezime || '';
-            if (activeChip) activeChip.textContent = `${p.ime || ''} ${p.prezime || ''}`.trim();
-            
-            if (previewInfo) {
-              previewInfo.innerHTML = `
-                 <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 2px; color: #ffffff;">${UI.escapeHtml(UI.formatPersonName(p))}</div>
-                 ${p.godina_rodenja || p.godina_smrti ? `<div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 12px;">(${UI.escapeHtml(String(p.godina_rodenja || '?'))}. – ${UI.escapeHtml(String(p.godina_smrti || '?'))}.)</div>` : '<div style="margin-bottom: 12px;"></div>'}
-                 <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.8rem; color: #c9d1d9;">
-                   ${p.godina_rodenja ? `<li style="margin-bottom: 4px;"><span style="color: #8b949e; margin-right: 4px;">• Rođenje:</span> ${UI.escapeHtml(String(p.godina_rodenja))}</li>` : ''}
-                   ${p.godina_smrti ? `<li><span style="color: #8b949e; margin-right: 4px;">• Smrt:</span> ${UI.escapeHtml(String(p.godina_smrti))}</li>` : ''}
-                   ${p.djevojacko_prezime ? `<li style="margin-top: 4px;"><span style="color: #8b949e; margin-right: 4px;">• Djev. prezime:</span> ${UI.escapeHtml(p.djevojacko_prezime)}</li>` : ''}
-                 </ul>
-              `;
-            }
+        if (tag.person_id || tag.person_ime) {
+          const p = tag.person_id ? DB.getPersonById(tag.person_id) : null;
+          const displayIme = p ? (p.ime || '') : (tag.person_ime || '');
+          const displayPrezime = p ? (p.prezime || '') : (tag.person_prezime || '');
+          const displayYears = p ? UI.formatYears(p.godina_rodenja, p.godina_smrti) : UI.formatYears(tag.person_godina_rodenja, tag.person_godina_smrti);
+          
+          if (inputIme) inputIme.value = displayIme;
+          if (inputPrezime) inputPrezime.value = displayPrezime;
+          if (activeChip) activeChip.textContent = `${displayIme} ${displayPrezime}`.trim();
+          
+          if (previewInfo) {
+            previewInfo.innerHTML = `
+               <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 2px; color: #ffffff;">${UI.escapeHtml(displayIme + ' ' + displayPrezime)}</div>
+               ${displayYears ? `<div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 12px;">(${UI.escapeHtml(displayYears)})</div>` : '<div style="margin-bottom: 12px;"></div>'}
+               <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.8rem; color: #c9d1d9;">
+                 ${(p ? p.godina_rodenja : tag.person_godina_rodenja) ? `<li style="margin-bottom: 4px;"><span style="color: #8b949e; margin-right: 4px;">• Rođenje:</span> ${UI.escapeHtml(String(p ? p.godina_rodenja : tag.person_godina_rodenja))}</li>` : ''}
+                 ${(p ? p.godina_smrti : tag.person_godina_smrti) ? `<li><span style="color: #8b949e; margin-right: 4px;">• Smrt:</span> ${UI.escapeHtml(String(p ? p.godina_smrti : tag.person_godina_smrti))}</li>` : ''}
+                 ${(p && p.djevojacko_prezime) ? `<li style="margin-top: 4px;"><span style="color: #8b949e; margin-right: 4px;">• Djev. prezime:</span> ${UI.escapeHtml(p.djevojacko_prezime)}</li>` : ''}
+               </ul>
+            `;
+          }
 
-            if (familyInfo) {
-              let famHtml = '<ul style="list-style: none; padding: 0; margin: 0;">';
-              let hasFamily = false;
+          if (familyInfo) {
+            let famHtml = '<ul style="list-style: none; padding: 0; margin: 0;">';
+            let hasFamily = false;
+            if (p) {
               if (p.supruznik) {
                 hasFamily = true;
                 famHtml += `<li style="margin-bottom: 6px; display: flex; align-items: flex-start; gap: 6px;"><svg viewBox="0 0 24 24" width="14" height="14" stroke="#58a6ff" stroke-width="2" fill="none" style="margin-top: 2px;"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg> <span style="color: #8b949e; margin-right: 4px;">Supružnik:</span> <span style="color: #c9d1d9;">${UI.escapeHtml(p.supruznik)}</span></li>`;
@@ -447,20 +459,20 @@ const Tags = (function () {
                 hasFamily = true;
                 famHtml += `<li style="display: flex; align-items: flex-start; gap: 6px;"><svg viewBox="0 0 24 24" width="14" height="14" stroke="#58a6ff" stroke-width="2" fill="none" style="margin-top: 2px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg> <span style="color: #8b949e; margin-right: 4px;">Roditelji:</span> <span style="color: #c9d1d9;">${UI.escapeHtml(p.roditelji)}</span></li>`;
               }
-              famHtml += '</ul>';
-              
-              if (!hasFamily) {
-                famHtml = '<div style="color: var(--text-muted); font-size: 0.8rem; font-style: italic;">Nema unesenih obiteljskih veza.</div>';
-              }
-              familyInfo.innerHTML = famHtml;
             }
+            famHtml += '</ul>';
+            
+            if (!hasFamily) {
+              famHtml = '<div style="color: var(--text-muted); font-size: 0.8rem; font-style: italic;">Nema unesenih obiteljskih veza.</div>';
+            }
+            familyInfo.innerHTML = famHtml;
           }
         } else {
           if (inputIme) inputIme.value = '';
           if (inputPrezime) inputPrezime.value = '';
           if (activeChip) activeChip.textContent = 'Odaberite osobu';
-          if (previewInfo) previewInfo.innerHTML = '<div style="color:var(--text-muted); padding-top: 20px; text-align: center;">Osoba još nije povezana. Odaberite je iz filtera lijevo.</div>';
-          if (familyInfo) familyInfo.innerHTML = '';
+          if (previewInfo) previewInfo.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding-top: 10px;">Osoba nije povezana.</div>';
+          if (familyInfo) familyInfo.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem; font-style: italic;">Nema unesenih obiteljskih veza.</div>';
         }
         
         updateSidebarDropdown();
@@ -565,7 +577,15 @@ const Tags = (function () {
             
             const existingTag = DB.getAllTags().find(t => t.id === tagId);
             if (existingTag) {
-              const updated = DB.saveTag({ ...existingTag, person_id: person.id });
+              const updated = DB.saveTag({
+                ...existingTag,
+                person_id: person.id,
+                person_ime: person.ime,
+                person_prezime: person.prezime,
+                person_godina_rodenja: person.godina_rodenja,
+                person_godina_smrti: person.godina_smrti,
+                person_gedcom_id: person.raw_data?.gedcom_id || person.id
+              });
               CanvasEngine.addOrUpdateTag(updated, person);
               renderTagsList(_currentImageId);
               UI.toast(`${UI.formatPersonName(person)} – uspješno povezano.`, 'success');
@@ -663,6 +683,85 @@ const Tags = (function () {
 
     // Export svih portreta
     document.getElementById('btn-export-all-portraits')?.addEventListener('click', downloadAllPortraits);
+
+    // Toggle za odabir načina: Baza ili Ručni unos
+    const btnTagModeDb = document.getElementById('btn-tag-mode-db');
+    const btnTagModeManual = document.getElementById('btn-tag-mode-manual');
+    const tagModeDbContainer = document.getElementById('tag-mode-db-container');
+    const tagModeManualContainer = document.getElementById('tag-mode-manual-container');
+
+    if (btnTagModeDb && btnTagModeManual && tagModeDbContainer && tagModeManualContainer) {
+      btnTagModeDb.addEventListener('click', () => {
+        btnTagModeDb.classList.add('active');
+        btnTagModeManual.classList.remove('active');
+        tagModeDbContainer.style.display = 'flex';
+        tagModeManualContainer.style.display = 'none';
+      });
+
+      btnTagModeManual.addEventListener('click', () => {
+        btnTagModeManual.classList.add('active');
+        btnTagModeDb.classList.remove('active');
+        tagModeDbContainer.style.display = 'none';
+        tagModeManualContainer.style.display = 'flex';
+      });
+    }
+
+    // Spremanje ručnog unosa osobe
+    document.getElementById('btn-tag-save-manual')?.addEventListener('click', () => {
+      const inputIme = document.getElementById('sidebar-filter-ime');
+      const tagId = inputIme?.dataset.tagId;
+      if (!tagId) {
+        UI.toast('Prvo odaberite ili kreirajte okvir na slici.', 'warning');
+        return;
+      }
+
+      const ime = document.getElementById('tag-manual-ime').value.trim();
+      const prezime = document.getElementById('tag-manual-prezime').value.trim();
+      const rodenje = document.getElementById('tag-manual-rodenje').value.trim();
+      const smrti = document.getElementById('tag-manual-smrti').value.trim();
+
+      if (!ime || !prezime) {
+        UI.toast('Ime i prezime su obvezni.', 'warning');
+        return;
+      }
+
+      // 1. Spremi u bazu kao ručno unesenu osobu
+      const person = DB.savePerson({
+        ime,
+        prezime,
+        godina_rodenja: rodenje ? parseInt(rodenje) : null,
+        godina_smrti: smrti ? parseInt(smrti) : null,
+        custom_tags: 'manual'
+      });
+
+      // 2. Poveži tag s ovom osobom i snapshotiraj njezine podatke na tagu
+      const existingTag = DB.getAllTags().find(t => t.id === tagId);
+      if (existingTag) {
+        const updated = DB.saveTag({
+          ...existingTag,
+          person_id: person.id,
+          person_ime: person.ime,
+          person_prezime: person.prezime,
+          person_godina_rodenja: person.godina_rodenja,
+          person_godina_smrti: person.godina_smrti,
+          person_gedcom_id: person.id
+        });
+        
+        CanvasEngine.addOrUpdateTag(updated, person);
+        renderTagsList(_currentImageId);
+        UI.toast(`${ime} ${prezime} – ručno dodano i povezano.`, 'success');
+        
+        // Očisti ručnu formu
+        document.getElementById('tag-manual-ime').value = '';
+        document.getElementById('tag-manual-prezime').value = '';
+        document.getElementById('tag-manual-rodenje').value = '';
+        document.getElementById('tag-manual-smrti').value = '';
+        
+        // Vrati se na tab "Baza" i osvježi detalje
+        if (btnTagModeDb) btnTagModeDb.click();
+        CanvasEngine.selectTag(tagId);
+      }
+    });
   }
 
   return {

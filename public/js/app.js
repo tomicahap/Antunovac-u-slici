@@ -899,7 +899,8 @@ const App = (function () {
     _folderPickerBreadcrumb = [{ id: startFolderId, name: startFolderId === 'root' ? 'Moj Drive' : 'Polazišna mapa' }];
     
     document.getElementById('modal-folder-title').textContent =
-      target === 'input' ? 'Odaberi ulaznu mapu' : 'Odaberi izlaznu mapu';
+      target === 'input' ? 'Odaberi ulaznu mapu' :
+      target === 'portraits_tisak' ? 'Odaberi mapu za portrete (TISAK)' : 'Odaberi mapu za portrete (WEB)';
     document.getElementById('btn-folder-select').disabled = true;
     renderFolderBreadcrumb();
     loadFolderList(startFolderId);
@@ -995,9 +996,12 @@ const App = (function () {
       const subtitle = document.getElementById('gallery-folder-name');
       if (subtitle) subtitle.textContent = folderName;
       loadGallery(_folderPickerSelectedId);
-    } else {
-      DB.saveSettings({ outputFolderId: _folderPickerSelectedId, outputFolderName: folderName });
-      document.getElementById('output-folder-name').textContent = folderName;
+    } else if (_folderPickerTarget === 'portraits_tisak') {
+      DB.saveSettings({ portraitsTisakFolderId: _folderPickerSelectedId, portraitsTisakFolderName: folderName });
+      document.getElementById('tisak-folder-name').textContent = folderName;
+    } else if (_folderPickerTarget === 'portraits_web') {
+      DB.saveSettings({ portraitsWebFolderId: _folderPickerSelectedId, portraitsWebFolderName: folderName });
+      document.getElementById('web-folder-name').textContent = folderName;
     }
 
     UI.closeModal('modal-folder-picker');
@@ -1083,12 +1087,15 @@ const App = (function () {
     CanvasEngine.showLabels = settings.showLabels !== false;
 
     document.getElementById('toggle-auto-sync').checked = settings.autoSync !== false;
-    document.getElementById('portraits-subfolder-name').value = settings.portraitsSubfolder || 'Portreti';
 
     const inputName = settings.inputFolderName || 'Nije odabrana';
-    const outputName = settings.outputFolderName || 'Nije odabrana';
+    const tisakName = settings.portraitsTisakFolderName || 'Nije odabrana';
+    const webName = settings.portraitsWebFolderName || 'Nije odabrana';
     document.getElementById('input-folder-name').textContent = inputName;
-    document.getElementById('output-folder-name').textContent = outputName;
+    const tEl = document.getElementById('tisak-folder-name');
+    if (tEl) tEl.textContent = tisakName;
+    const wEl = document.getElementById('web-folder-name');
+    if (wEl) wEl.textContent = webName;
 
     const defaultStartFolder = settings.defaultStartFolder || 'root';
     if (document.getElementById('default-start-folder')) {
@@ -1110,7 +1117,6 @@ const App = (function () {
       jpegQuality: parseInt(document.getElementById('jpeg-quality')?.value) || 92,
       showLabels: document.getElementById('toggle-show-labels')?.checked !== false,
       autoSync: document.getElementById('toggle-auto-sync')?.checked !== false,
-      portraitsSubfolder: document.getElementById('portraits-subfolder-name')?.value || 'Portreti',
       defaultStartFolder: startFolderId
     });
     CanvasEngine.showLabels = settings.showLabels;
@@ -1282,9 +1288,13 @@ const App = (function () {
       if (!_authStatus?.authenticated) { UI.toast('Prvo povežite Google Drive.', 'warning'); return; }
       openFolderPicker('input');
     });
-    document.getElementById('btn-pick-output-folder')?.addEventListener('click', () => {
+    document.getElementById('btn-pick-tisak-folder')?.addEventListener('click', () => {
       if (!_authStatus?.authenticated) { UI.toast('Prvo povežite Google Drive.', 'warning'); return; }
-      openFolderPicker('output');
+      openFolderPicker('portraits_tisak');
+    });
+    document.getElementById('btn-pick-web-folder')?.addEventListener('click', () => {
+      if (!_authStatus?.authenticated) { UI.toast('Prvo povežite Google Drive.', 'warning'); return; }
+      openFolderPicker('portraits_web');
     });
 
     document.getElementById('btn-folder-select')?.addEventListener('click', confirmFolderSelection);

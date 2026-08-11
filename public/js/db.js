@@ -145,13 +145,36 @@ const DB = (function () {
     }, 1000);
   }
 
+  async function syncItem(collection, id, data) {
+    if (!_autoSync) return;
+    try {
+      await fetch('/api/drive/db/save-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection, id, data })
+      });
+    } catch (e) {
+      console.error(`[DB] Greška pri sinkronizaciji stavke ${collection}/${id}:`, e);
+    }
+  }
+
+  async function deleteItem(collection, id) {
+    if (!_autoSync) return;
+    try {
+      await fetch('/api/drive/db/delete-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection, id })
+      });
+    } catch (e) {
+      console.error(`[DB] Greška pri brisanju stavke ${collection}/${id}:`, e);
+    }
+  }
+
   async function saveToStorage(collection) {
     const val = _data[collection];
     await idbSet(KEYS[collection], val);
     lsSet(KEYS[collection], val);
-    
-    // Sinkroniziraj cijelu bazu na server
-    debounceSaveToServer();
   }
 
   // ─── Sync Queue ────────────────────────────────────────────────────────────
@@ -330,8 +353,7 @@ const DB = (function () {
     }
 
     saveToStorage('persons');
-    queueAdd({ collection: 'persons', op: 'set', id: person.id, data: person });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) syncPerson(person);
+    syncPerson(person);
     return person;
   }
 
@@ -369,15 +391,10 @@ const DB = (function () {
 
   function deletePerson(id) {
     _data.persons = _data.persons.filter(p => p.id !== id);
-    // Obriši i sve tagove ove osobe
     _data.tags = _data.tags.filter(t => t.person_id !== id);
     saveToStorage('persons');
     saveToStorage('tags');
-    queueAdd({ collection: 'persons', op: 'delete', id });
-    queueAdd({ collection: 'tags', op: 'deleteWhere', field: 'person_id', value: id });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) {
-      _db.collection('persons').doc(id).delete().catch(console.error);
-    }
+    deleteItem('persons', id);
   }
 
   // ── Tags ──
@@ -401,6 +418,15 @@ const DB = (function () {
       x: data.x, y: data.y, width: data.width, height: data.height,
       portrait_filename: data.portrait_filename || null,
       portrait_drive_id: data.portrait_drive_id || null,
+      portrait_tisak_drive_id: data.portrait_tisak_drive_id || null,
+      
+      // Snapshotirani podaci o osobi
+      person_ime: data.person_ime || null,
+      person_prezime: data.person_prezime || null,
+      person_godina_rodenja: data.person_godina_rodenja || null,
+      person_godina_smrti: data.person_godina_smrti || null,
+      person_gedcom_id: data.person_gedcom_id || null,
+
       created_at: data.created_at || now(),
       updated_at: now()
     };
@@ -414,18 +440,14 @@ const DB = (function () {
     }
 
     saveToStorage('tags');
-    queueAdd({ collection: 'tags', op: 'set', id: tag.id, data: tag });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) syncTag(tag);
+    syncTag(tag);
     return tag;
   }
 
   function deleteTag(id) {
     _data.tags = _data.tags.filter(t => t.id !== id);
     saveToStorage('tags');
-    queueAdd({ collection: 'tags', op: 'delete', id });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) {
-      _db.collection('tags').doc(id).delete().catch(console.error);
-    }
+    deleteItem('tags', id);
   }
 
   // ── Images ──
@@ -461,8 +483,7 @@ const DB = (function () {
     }
 
     saveToStorage('images');
-    queueAdd({ collection: 'images', op: 'set', id: image.id, data: image });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) syncImage(image);
+    syncImage(image);
     return image;
   }
 
@@ -481,10 +502,7 @@ const DB = (function () {
   function deleteComment(commentId) {
     _data.comments = (_data.comments || []).filter(c => c.id !== commentId);
     saveToStorage('comments');
-    queueAdd({ collection: 'comments', op: 'delete', id: commentId });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) {
-      _db.collection('comments').doc(commentId).delete().catch(console.error);
-    }
+    deleteItem('comments', commentId);
     return true;
   }
 
@@ -502,119 +520,40 @@ const DB = (function () {
 
     _data.comments.push(comment);
     saveToStorage('comments');
-    queueAdd({ collection: 'comments', op: 'set', id: comment.id, data: comment });
-    if (_firestoreEnabled && _autoSync && navigator.onLine) {
-      _db.collection('comments').doc(comment.id).set(comment).catch(console.error);
-    }
+    syncComment(comment);
     return comment;
   }
 
   // ─── Firestore sync operacije ──────────────────────────────────────────────
 
   async function syncPerson(person) {
-    if (!_firestoreEnabled || !_db) return;
-    try { await _db.collection('persons').doc(person.id).set(person); }
-    catch (e) { console.error('[DB] Sync person error:', e.message); }
+    await syncItem('persons', person.id, person);
   }
 
   async function syncTag(tag) {
-    if (!_firestoreEnabled || !_db) return;
-    try { await _db.collection('tags').doc(tag.id).set(tag); }
-    catch (e) { console.error('[DB] Sync tag error:', e.message); }
+    await syncItem('tags', tag.id, tag);
   }
 
   async function syncImage(image) {
-    if (!_firestoreEnabled || !_db) return;
-    try { await _db.collection('images').doc(image.id).set(image); }
-    catch (e) { console.error('[DB] Sync image error:', e.message); }
+    await syncItem('images', image.id, image);
   }
 
-  /**
-   * Šalje sve pending operacije iz sync queue na Firestore.
-   */
+  async function syncComment(comment) {
+    await syncItem('comments', comment.id, comment);
+  }
+
+  async function syncSettings(settings) {
+    await syncItem('settings', 'app_settings', settings);
+  }
+
   async function flushQueue() {
-    if (!_firestoreEnabled || !_db || _syncInProgress) return;
-    const queue = queueGet();
-    if (queue.length === 0) return;
-
-    _syncInProgress = true;
-    emitSyncStatus('syncing');
-
-    try {
-      const batch = _db.batch();
-      let batchCount = 0;
-
-      for (const op of queue) {
-        const ref = _db.collection(op.collection).doc(op.id);
-        if (op.op === 'set' && op.data) {
-          batch.set(ref, op.data, { merge: true });
-          batchCount++;
-        } else if (op.op === 'delete') {
-          batch.delete(ref);
-          batchCount++;
-        }
-
-        // Firestore batch limit je 500
-        if (batchCount >= 450) break;
-      }
-
-      if (batchCount > 0) await batch.commit();
-      queueClear();
-      emitSyncStatus('connected');
-      console.log(`[DB] Sinkronizirano ${batchCount} operacija`);
-    } catch (e) {
-      console.error('[DB] Flush queue greška:', e.message);
-      emitSyncStatus('error', e.message);
-    } finally {
-      _syncInProgress = false;
-    }
+    return true;
   }
 
-  /**
-   * Povlači sve podatke iz Firestorea i zamjenjuje lokalne.
-   */
   async function pullFromFirestore() {
-    if (!_firestoreEnabled || !_db) return false;
-    emitSyncStatus('syncing');
-
-    try {
-      const [personsSnap, tagsSnap, imagesSnap, commentsSnap] = await Promise.all([
-        _db.collection('persons').get(),
-        _db.collection('tags').get(),
-        _db.collection('images').get(),
-        _db.collection('comments').get()
-      ]);
-
-      const personsRemote = personsSnap.docs.map(d => d.data());
-      const tagsRemote    = tagsSnap.docs.map(d => d.data());
-      const imagesRemote  = imagesSnap.docs.map(d => d.data());
-      const commentsRemote = commentsSnap.docs.map(d => d.data());
-
-      // Merge: remote pobjeđuje ako je noviji
-      _data.persons = mergeCollections(_data.persons, personsRemote);
-      _data.tags    = mergeCollections(_data.tags, tagsRemote);
-      _data.images  = mergeCollections(_data.images, imagesRemote);
-      _data.comments = mergeCollections(_data.comments, commentsRemote);
-
-      saveToStorage('persons');
-      saveToStorage('tags');
-      saveToStorage('images');
-      saveToStorage('comments');
-
-      emitSyncStatus('connected');
-      console.log(`[DB] Povučeno iz Firestorea: ${personsRemote.length} osoba, ${tagsRemote.length} tagova, ${imagesRemote.length} slika, ${commentsRemote.length} komentara`);
-      return true;
-    } catch (e) {
-      console.error('[DB] Pull greška:', e.message);
-      emitSyncStatus('error', e.message);
-      return false;
-    }
+    return true;
   }
 
-  /**
-   * Spaja lokalnu i remote kolekciju po ID-u.
-   * Remote pobjeđuje ako je updated_at noviji.
-   */
   function mergeCollections(local, remote) {
     const map = new Map();
     local.forEach(item => map.set(item.id, item));
@@ -688,8 +627,11 @@ const DB = (function () {
   function saveSettings(settings) {
     const current = getSettings();
     const merged = { ...current, ...settings };
+    _data.settings = merged;
     lsSet(KEYS.settings, merged);
+    idbSet(KEYS.settings, merged);
     _autoSync = merged.autoSync !== false;
+    syncSettings(merged);
     return merged;
   }
 

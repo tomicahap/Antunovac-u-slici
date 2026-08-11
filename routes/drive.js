@@ -9,6 +9,7 @@ const router = express.Router();
 const multer = require('multer');
 const { getDriveClient, getAuthenticatedClient } = require('../utils/driveClient');
 const { isTiff, tiffToJpeg } = require('../utils/tiffConverter');
+const firebaseDb = require('../utils/firebase');
 
 // Multer za upload u memoriji (ne na disk)
 const upload = multer({
@@ -346,10 +347,13 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
   try {
     const drive = await getDriveClient(req.session);
     const { id } = req.params;
-    const { x, y, width, height, folderId, filename, existingFileId } = req.body;
+    const { x, y, width, height, folderId, filename, existingFileId, existingTisakFileId } = req.body;
 
-    if (!folderId || !filename) {
-      return res.status(400).json({ error: 'Nedostaje folderId ili filename.' });
+    const tisakFolderId = req.body.portraitsTisakFolderId || process.env.PORTRAITS_TISAK_FOLDER_ID || folderId;
+    const webFolderId = req.body.portraitsWebFolderId || process.env.PORTRAITS_WEB_FOLDER_ID || folderId;
+
+    if (!tisakFolderId || !webFolderId || !filename) {
+      return res.status(400).json({ error: 'Nedostaju identifikatori mapa ili naziv datoteke.' });
     }
 
     // 1. Dohvati metapodatke o datoteci radi točnog formata (mimeType)
@@ -393,66 +397,95 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
 
         console.log(`[CropAndUpload] Rezanje: left=${cropX}, top=${cropY}, width=${cropW}, height=${cropH}`);
 
-        let processed = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
+        // ─── A. TISAK VERZIJA (Originalna rezolucija) ───
+        let processedTisak = img.extract({ left: cropX, top: cropY, width: cropW, height: cropH });
 
-        if (originalMimeType && (originalMimeType.includes('tiff') || originalMimeType.includes('tif'))) {
-          processed = processed.tiff({
-            compression: 'none',
-            quality: 100,
-            xres: 300,
-            yres: 300
-          });
-        } else if (originalMimeType && originalMimeType.includes('png')) {
-          processed = processed.png({
-            compressionLevel: 0,
-            xres: 300,
-            yres: 300
-          });
-        } else if (originalMimeType && originalMimeType.includes('webp')) {
-          processed = processed.webp({
-            quality: 100,
-            lossless: true
-          });
+        if (originalMimeType.includes('tiff') || originalMimeType.includes('tif')) {
+          processedTisak = processedTisak.tiff({ compression: 'none', quality: 100 });
+        } else if (originalMimeType.includes('png')) {
+          processedTisak = processedTisak.png({ compressionLevel: 0 });
+        } else if (originalMimeType.includes('webp')) {
+          processedTisak = processedTisak.webp({ quality: 100, lossless: true });
         } else {
-          processed = processed.jpeg({
-            quality: 100,
-            chromaSubsampling: '4:4:4',
-            xres: 300,
-            yres: 300
-          });
+          processedTisak = processedTisak.jpeg({ quality: 100, chromaSubsampling: '4:4:4' });
         }
+        const tisakBuffer = await processedTisak.toBuffer();
 
-        const outBuffer = await processed.toBuffer();
-        console.log(`[CropAndUpload] Rezanje uspješno. Veličina buffera: ${outBuffer.length} bajtova.`);
+        // ─── B. WEB VERZIJA (Maksimalno 800px, komprimirana) ───
+        let webW = cropW;
+        let webH = cropH;
+        if (webW > 800 || webH > 800) {
+          if (webW > webH) {
+            webH = Math.round((800 / webW) * webH);
+            webW = 800;
+          } else {
+            webW = Math.round((800 / webH) * webW);
+            webH = 800;
+          }
+        }
+        
+        let processedWeb = sharp(rotatedBuffer)
+          .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
+          .resize(webW, webH)
+          .jpeg({ quality: 65, chromaSubsampling: '4:2:0' });
+        const webBuffer = await processedWeb.toBuffer();
 
-        // 3. Prenesi novonastalu sliku izravno na Google Drive
+        console.log(`[CropAndUpload] Obrada završena. Tisak buffer: ${tisakBuffer.length} B, Web buffer: ${webBuffer.length} B.`);
+
+        // ─── C. PRIJENOS NA GOOGLE DRIVE ───
         const { Readable } = require('stream');
-        const uploadStream = Readable.from(outBuffer);
 
-        let response;
-        if (existingFileId) {
-          // Prepiši postojeći portret
-          console.log(`[CropAndUpload] Ažuriranje postojećeg portreta: ${existingFileId}`);
-          response = await drive.files.update({
-            fileId: existingFileId,
+        // 1. Upload TISAK verzije
+        let tisakResponse;
+        if (existingTisakFileId) {
+          console.log(`[CropAndUpload] Ažuriranje postojećeg TISAK portreta: ${existingTisakFileId}`);
+          tisakResponse = await drive.files.update({
+            fileId: existingTisakFileId,
             media: {
               mimeType: originalMimeType,
-              body: uploadStream
+              body: Readable.from(tisakBuffer)
             },
             fields: 'id, name, webViewLink'
           });
         } else {
-          // Riješi konflikt naziva i kreiraj novu datoteku
-          const finalFilename = await resolveFilenameConflict(drive, folderId, filename);
-          console.log(`[CropAndUpload] Kreiranje novog portreta: ${finalFilename} u mapi: ${folderId}`);
-          response = await drive.files.create({
+          const finalFilenameTisak = await resolveFilenameConflict(drive, tisakFolderId, filename);
+          console.log(`[CropAndUpload] Kreiranje novog TISAK portreta: ${finalFilenameTisak} u mapi: ${tisakFolderId}`);
+          tisakResponse = await drive.files.create({
             requestBody: {
-              name: finalFilename,
-              parents: [folderId]
+              name: finalFilenameTisak,
+              parents: [tisakFolderId]
             },
             media: {
               mimeType: originalMimeType,
-              body: uploadStream
+              body: Readable.from(tisakBuffer)
+            },
+            fields: 'id, name, webViewLink'
+          });
+        }
+
+        // 2. Upload WEB verzije
+        let webResponse;
+        if (existingFileId) {
+          console.log(`[CropAndUpload] Ažuriranje postojećeg WEB portreta: ${existingFileId}`);
+          webResponse = await drive.files.update({
+            fileId: existingFileId,
+            media: {
+              mimeType: 'image/jpeg',
+              body: Readable.from(webBuffer)
+            },
+            fields: 'id, name, webViewLink'
+          });
+        } else {
+          const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, filename);
+          console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${webFolderId}`);
+          webResponse = await drive.files.create({
+            requestBody: {
+              name: finalFilenameWeb,
+              parents: [webFolderId]
+            },
+            media: {
+              mimeType: 'image/jpeg',
+              body: Readable.from(webBuffer)
             },
             fields: 'id, name, webViewLink'
           });
@@ -460,9 +493,11 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
 
         res.json({
           success: true,
-          fileId: response.data.id,
-          filename: response.data.name,
-          webViewLink: response.data.webViewLink
+          fileId: webResponse.data.id,
+          filename: webResponse.data.name,
+          webViewLink: webResponse.data.webViewLink,
+          tisakFileId: tisakResponse.data.id,
+          tisakWebViewLink: tisakResponse.data.webViewLink
         });
       } catch (err) {
         console.error('[CropAndUpload] Greška pri obradi/prijenosu:', err);
@@ -773,123 +808,82 @@ setTimeout(async () => {
 }, 5000);
 
 // ─── GET /api/drive/db/load ──────────────────────────────────────────────────
-// Učitava bazu podataka s Google Drive-a ili iz lokalnog cache-a
+// Učitava bazu podataka s Firebase Firestore ili iz lokalnog fallbacka
 router.get('/db/load', async (req, res) => {
   try {
-    // 1. Ako postoji lokalni cache, vrati ga odmah
-    if (fs.existsSync(dbFile)) {
-      const data = fs.readFileSync(dbFile, 'utf8');
-      return res.json(JSON.parse(data));
-    }
-
-    // 2. Ako ne postoji lokalni cache, probaj skinuti s Google Drive-a
-    let drive;
-    try {
-      drive = await getDriveClient(req.session);
-    } catch {
-      // Nema Google Drive sesije (korisnik je posjetitelj i još se nitko nije spojio)
-      return res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
-    }
-
-    // Pretraži Google Drive za naziv datoteke 'antunovac_db.json'
-    const filesResponse = await drive.files.list({
-      q: "name = 'antunovac_db.json' and trashed = false",
-      fields: 'files(id, name)',
-      pageSize: 1
-    });
-
-    const files = filesResponse.data.files || [];
-    if (files.length > 0) {
-      const fileId = files[0].id;
-      const downloadResponse = await drive.files.get(
-        { fileId, alt: 'media' },
-        { responseType: 'text' }
-      );
-      
-      let dbData = downloadResponse.data;
-      if (typeof dbData === 'string') {
-        try { dbData = JSON.parse(dbData); } catch {}
-      }
-      
-      // Spremi lokalno
-      const dataDir = path.dirname(dbFile);
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-      fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
-
-      return res.json(dbData);
-    }
-
-    // 3. Ako nigdje ne postoji, vrati praznu bazu
-    res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
+    const data = await firebaseDb.loadAll();
+    res.json(data);
   } catch (err) {
     console.error('[DB-Load] Greška:', err.message);
     res.json({ settings: {}, persons: [], tags: [], images: [], comments: [] });
   }
 });
 
+// ─── POST /api/drive/db/save-item ────────────────────────────────────────────
+// Granularno spremanje jedne stavke u Firestore
+router.post('/db/save-item', express.json({ limit: '5mb' }), async (req, res) => {
+  try {
+    const { collection, id, data } = req.body;
+    if (!collection || !id || !data) {
+      return res.status(400).json({ error: 'Nedostaju collection, id ili data.' });
+    }
+    await firebaseDb.saveDoc(collection, id, data);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DB-SaveItem] Greška:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/drive/db/delete-item ──────────────────────────────────────────
+// Granularno brisanje jedne stavke iz Firestorea
+router.post('/db/delete-item', express.json(), async (req, res) => {
+  try {
+    const { collection, id } = req.body;
+    if (!collection || !id) {
+      return res.status(400).json({ error: 'Nedostaju collection ili id.' });
+    }
+    await firebaseDb.deleteDoc(collection, id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DB-DeleteItem] Greška:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/drive/db/save ─────────────────────────────────────────────────
-// Sprema bazu podataka lokalno i sinkronizira je na Google Drive u pozadini
+// Sprema cjelokupnu bazu (zadržano radi kompatibilnosti)
 router.post('/db/save', express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const dbData = req.body;
     if (!dbData) return res.status(400).json({ error: 'Nedostaje sadržaj baze.' });
 
-    // 1. Spremi lokalno na disk (brzi cache)
-    const dataDir = path.dirname(dbFile);
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(dbFile, JSON.stringify(dbData, null, 2));
-
-    // Odgovori klijentu odmah
-    res.json({ success: true, message: 'Baza spremljena lokalno.' });
-
-    // 2. Sinkroniziraj na Google Drive asinkrono u pozadini
-    const outputFolderId = dbData.settings?.outputFolderId;
-    if (!outputFolderId) return;
-
-    (async () => {
-      try {
-        const drive = await getDriveClient(req.session);
-        
-        // Nađi postojeću antunovac_db.json u output mapi
-        const searchResponse = await drive.files.list({
-          q: `name = 'antunovac_db.json' and '${outputFolderId}' in parents and trashed = false`,
-          fields: 'files(id, name)',
-          pageSize: 1
-        });
-
-        const files = searchResponse.data.files || [];
-        const { Readable } = require('stream');
-        const stream = Readable.from(JSON.stringify(dbData, null, 2));
-
-        if (files.length > 0) {
-          // Ažuriraj postojeću
-          await drive.files.update({
-            fileId: files[0].id,
-            media: {
-              mimeType: 'application/json',
-              body: stream
-            }
-          });
-          console.log('[DB-Save] Baza antunovac_db.json uspješno ažurirana na Google Drive-u.');
-        } else {
-          // Kreiraj novu
-          await drive.files.create({
-            requestBody: {
-              name: 'antunovac_db.json',
-              parents: [outputFolderId]
-            },
-            media: {
-              mimeType: 'application/json',
-              body: stream
-            }
-          });
-          console.log('[DB-Save] Nova baza antunovac_db.json uspješno kreirana na Google Drive-u.');
+    // Ako je Firestore omogućen, sinkroniziraj asinkrono u pozadini
+    if (firebaseDb.isEnabled()) {
+      (async () => {
+        try {
+          if (dbData.settings) await firebaseDb.saveDoc('settings', 'app_settings', dbData.settings);
+          if (dbData.persons) {
+            for (const p of dbData.persons) await firebaseDb.saveDoc('persons', p.id, p);
+          }
+          if (dbData.tags) {
+            for (const t of dbData.tags) await firebaseDb.saveDoc('tags', t.id, t);
+          }
+          if (dbData.images) {
+            for (const img of dbData.images) await firebaseDb.saveDoc('images', img.id, img);
+          }
+          if (dbData.comments) {
+            for (const c of dbData.comments) await firebaseDb.saveDoc('comments', c.id, c);
+          }
+          console.log('[DB-Save] Cijela baza sinkronizirana u Firestore u pozadini.');
+        } catch (e) {
+          console.error('[DB-Save] Greška pri pozadinskom Firestore syncu:', e.message);
         }
-      } catch (err) {
-        console.error('[DB-Save-Background] Greška pri sinkronizaciji na Drive:', err.message);
-      }
-    })();
-
+      })();
+    } else {
+      firebaseDb.writeLocalDb(dbData);
+    }
+    res.json({ success: true, message: 'Baza sinkronizirana.' });
   } catch (err) {
     console.error('[DB-Save] Greška:', err.message);
     res.status(500).json({ error: err.message });

@@ -245,7 +245,7 @@
             <!-- Popis svih oznaka (prikazuje se kad nije selektiran nijedan tag) -->
             <div id="sidebar-tags-list-container" style="display: flex; flex-direction: column; gap: 12px; flex: 1;">
               <ul class="tags-list" id="tags-list" role="list" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px;">
-                <!-- Tags se generiraju dinamiki -->
+                <!-- Tags se generiraju dinamički -->
               </ul>
               <div class="tags-empty" id="tags-empty" style="text-align: center; padding: 24px; color: var(--text-muted);">
                 <svg viewBox="0 0 48 48" fill="none" width="32" height="32" style="margin: 0 auto 12px; display: block; opacity: 0.6;"><rect x="8" y="8" width="32" height="32" rx="3" stroke="currentColor" stroke-width="2" stroke-dasharray="4 2"/><path d="M18 24h12M24 18v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -259,9 +259,15 @@
               <!-- STUPAC 1 (Desni dio splitscreen-a ali s lijeve strane): Za odabir osobe kada se povezuje sa okvirom -->
               <div class="sidebar-selector-col-left" style="width: 50%; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid var(--border); padding-right: 16px; min-height: 0;">
                 
-                <!-- Forme za pretragu (ime i prezime) -->
-                <div class="tag-search-container" style="display: flex; flex-direction: column; gap: 10px; background: var(--bg-base); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0;">
-                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">TRA}I OSOBU:</div>
+                <!-- Odabir načina: Baza ili Ručni unos -->
+                <div style="display: flex; gap: 8px; margin-bottom: 4px; flex-shrink: 0;">
+                  <button class="btn btn-xs btn-outline btn-full active" id="btn-tag-mode-db" style="width: 50%;">Odabir iz baze</button>
+                  <button class="btn btn-xs btn-outline btn-full" id="btn-tag-mode-manual" style="width: 50%;">Ručni unos</button>
+                </div>
+
+                <!-- 1. ODABIR IZ BAZE (Pretraga & Autocomplete) -->
+                <div id="tag-mode-db-container" style="display: flex; flex-direction: column; gap: 10px; background: var(--bg-base); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0; flex: 1; min-height: 0;">
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">TRAŽI OSOBU:</div>
                   
                   <div style="display: flex; flex-direction: column; gap: 8px;">
                     <div style="position: relative;">
@@ -269,8 +275,40 @@
                     </div>
                     
                     <div style="position: relative;">
-                      <input type="text" class="tag-search-input" id="sidebar-filter-prezime" placeholder="Prezime (djevojako, roditelji)..." autocomplete="off" style="width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none; transition: border-color var(--transition-fast);">
+                      <input type="text" class="tag-search-input" id="sidebar-filter-prezime" placeholder="Prezime (djevojačko, roditelji)..." autocomplete="off" style="width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none; transition: border-color var(--transition-fast);">
                       <button id="sidebar-filter-clear" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: none; padding: 4px;"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                    </div>
+                  </div>
+                  
+                  <div class="autocomplete-dropdown" id="sidebar-autocomplete-dropdown" style="display: block; position: relative !important; flex: 1; overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 4px; min-height: 120px;">
+                    <div style="padding: 10px; font-size: 0.8rem; color: var(--text-muted); text-align: center;">Počnite upisivati za pretragu...</div>
+                  </div>
+                </div>
+
+                <!-- 2. RUČNI UNOS OSOBE -->
+                <div id="tag-mode-manual-container" style="display: none; flex-direction: column; gap: 10px; background: var(--bg-base); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); flex-shrink: 0; flex: 1; overflow-y: auto; min-height: 0;">
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">RUČNI UNOS OSOBE:</div>
+                  
+                  <div class="form-group">
+                    <label class="form-label" style="font-size:0.75rem;">Ime <span style="color:var(--danger)">*</span></label>
+                    <input type="text" class="form-input form-input-sm" id="tag-manual-ime" placeholder="npr. Ivan">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size:0.75rem;">Prezime <span style="color:var(--danger)">*</span></label>
+                    <input type="text" class="form-input form-input-sm" id="tag-manual-prezime" placeholder="npr. Horvat">
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <div class="form-group" style="flex:1;">
+                      <label class="form-label" style="font-size:0.75rem;">God. rođenja</label>
+                      <input type="number" class="form-input form-input-sm" id="tag-manual-rodenje" placeholder="1900">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                      <label class="form-label" style="font-size:0.75rem;">God. smrti</label>
+                      <input type="number" class="form-input form-input-sm" id="tag-manual-smrti" placeholder="1980">
+                    </div>
+                  </div>
+                  <button class="btn btn-xs btn-primary mt-sm btn-full" id="btn-tag-save-manual" style="width: 100%;">Primijeni ručni unos</button>
+                </div>0%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: none; padding: 4px;"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
                     </div>
                   </div>
                   
@@ -585,25 +623,27 @@
           </div>
 
           <div class="form-group" id="drive-folder-section" style="display:none;">
-            <label class="form-label">Ulazna mapa (izvor fotografija)</label>
+            <label class="form-label">Početna mapa s originalnim slikama (MAIN_FOLDER_ID)</label>
             <div class="folder-picker" id="input-folder-picker">
               <span class="folder-name" id="input-folder-name">Nije odabrana</span>
               <button class="btn btn-outline btn-xs" id="btn-pick-input-folder">Odaberi</button>
             </div>
 
-            <label class="form-label mt-md">Izlazna mapa (obrađene slike)</label>
-            <div class="folder-picker" id="output-folder-picker">
-              <span class="folder-name" id="output-folder-name">Nije odabrana</span>
-              <button class="btn btn-outline btn-xs" id="btn-pick-output-folder">Odaberi</button>
+            <label class="form-label mt-md">Mapa za portrete u visokoj rezoluciji - ZA TISAK (PORTRAITS_TISAK_FOLDER_ID)</label>
+            <div class="folder-picker" id="tisak-folder-picker">
+              <span class="folder-name" id="tisak-folder-name">Nije odabrana</span>
+              <button class="btn btn-outline btn-xs" id="btn-pick-tisak-folder">Odaberi</button>
             </div>
 
-            <label class="form-label mt-md">Naziv podmape za portrete</label>
-            <input type="text" class="form-input" id="portraits-subfolder-name" value="Portreti" placeholder="npr. Portreti">
-            <p class="form-hint">Podmapa će se kreirati unutar Izlazne mape.</p>
+            <label class="form-label mt-md">Mapa za portrete u smanjenoj rezoluciji - ZA WEB (PORTRAITS_WEB_FOLDER_ID)</label>
+            <div class="folder-picker" id="web-folder-picker">
+              <span class="folder-name" id="web-folder-name">Nije odabrana</span>
+              <button class="btn btn-outline btn-xs" id="btn-pick-web-folder">Odaberi</button>
+            </div>
 
             <label class="form-label mt-md">Polazišna mapa za odabir (URL ili ID)</label>
             <input type="text" class="form-input" id="default-start-folder" placeholder="Unesite ID ili URL mape">
-            <p class="form-hint">Od ove mape će kretati pretraživanje prilikom odabira ulazne/izlazne mape.</p>
+            <p class="form-hint">Od ove mape će kretati pretraživanje prilikom odabira mapa.</p>
           </div>
         </div>
 
