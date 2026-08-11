@@ -240,8 +240,8 @@ const DriveAPI = (function () {
     return request('GET', '/config');
   }
 
-  async function copyFile(fileId, outputFolderId, newFilename) {
-    return request('POST', `/drive/file/${fileId}/copy`, { outputFolderId, newFilename });
+  async function copyFile(fileId, outputFolderId) {
+    return request('POST', `/drive/file/${fileId}/copy`, { outputFolderId });
   }
 
   async function cropAndUploadFile(fileId, params) {

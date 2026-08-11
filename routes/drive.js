@@ -60,25 +60,59 @@ router.get('/folders', async (req, res) => {
 });
 
 // ─── POST /api/drive/file/:id/copy ───────────────────────────────────────────
-// Kopiranje slike u drugi folder sa novim imenom
+// Kopiranje slike u drugi folder sa automatskim rednim brojem na temelju sadržaja mape
 router.post('/file/:id/copy', express.json(), async (req, res) => {
   try {
     const originalDriveId = req.params.id;
-    const { outputFolderId, newFilename } = req.body;
+    const { outputFolderId } = req.body;
     if (!outputFolderId) return res.status(400).json({ error: 'Nedostaje outputFolderId.' });
-    if (!newFilename) return res.status(400).json({ error: 'Nedostaje newFilename.' });
 
     const drive = await getDriveClient(req.session);
+
+    // 1. Pretraži datoteke u mapi kako bismo izračunali zadnji redni broj
+    let maxSeq = 0;
+    try {
+      const filesResponse = await drive.files.list({
+        q: `'${outputFolderId}' in parents and name contains 'Antunovac-u-slici-' and trashed = false`,
+        fields: 'files(name)',
+        pageSize: 1000
+      });
+      const files = filesResponse.data.files || [];
+      files.forEach(f => {
+        const match = f.name.match(/Antunovac-u-slici-(\d+)/i);
+        if (match) {
+          const seq = parseInt(match[1], 10);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      });
+    } catch (e) {
+      console.warn('[Drive] Nije moguće učitati redne brojeve za kopiranje:', e.message);
+    }
+
+    const nextSeq = maxSeq + 1;
+
+    // 2. Saznaj format originalne datoteke
+    const fileMetadata = await drive.files.get({
+      fileId: originalDriveId,
+      fields: 'name'
+    });
+    const originalName = fileMetadata.data.name || 'slika.jpg';
+    const ext = originalName.split('.').pop() || 'jpg';
+    const computedFilename = `Antunovac-u-slici-${String(nextSeq).padStart(4, '0')}.${ext}`;
+
+    console.log(`[Drive] Kopiranje originala ${originalDriveId} kao ${computedFilename} (redni broj: ${nextSeq})`);
+
+    // 3. Izvedi kopiranje
     const response = await drive.files.copy({
       fileId: originalDriveId,
       requestBody: {
-        name: newFilename,
+        name: computedFilename,
         parents: [outputFolderId]
       },
       fields: 'id, name, webViewLink, thumbnailLink'
     });
 
-    res.json({ success: true, file: response.data });
+    res.json({ success: true, file: response.data, sequence_no: nextSeq });
   } catch (err) {
     console.error('[Drive] Greška pri kopiranju datoteke:', err.message);
     res.status(err.status || 500).json({ error: err.message });

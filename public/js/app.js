@@ -777,20 +777,10 @@ const App = (function () {
 
         UI.showLoading('Kopiranje i priprema originalne slike na Google Drive...');
 
-        const images = DB.getAllImages();
-        let maxSeq = 0;
-        images.forEach(img => {
-          if (img.sequence_no && img.sequence_no > maxSeq) {
-            maxSeq = img.sequence_no;
-          }
-        });
-        const nextSeq = maxSeq + 1;
-        const ext = file.name.split('.').pop() || 'jpg';
-        const newFilename = `Antunovac-u-slici-${String(nextSeq).padStart(4, '0')}.${ext}`;
-
         try {
-          const response = await DriveAPI.copyFile(file.id, outputFolderId, newFilename);
+          const response = await DriveAPI.copyFile(file.id, outputFolderId);
           const copiedFile = response.file;
+          const nextSeq = response.sequence_no;
 
           imageRec = DB.saveImage({
             id: imageRec ? imageRec.id : null,
