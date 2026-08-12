@@ -806,9 +806,9 @@ const App = (function () {
     if (_userRole === 'admin') {
       if (!imageRec || !imageRec.output_drive_id) {
         const settings = DB.getSettings();
-        const outputFolderId = settings.outputFolderId;
+        const outputFolderId = settings.outputFolderId || settings.inputFolderId;
         if (!outputFolderId) {
-          UI.toast('Prvo odaberite izlaznu mapu u postavkama.', 'error');
+          UI.toast('Prvo odaberite početnu mapu s originalnim slikama u postavkama.', 'error');
           return;
         }
 

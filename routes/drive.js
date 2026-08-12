@@ -28,6 +28,37 @@ const IMAGE_MIME_TYPES = [
   'image/x-tiff', 'image/webp'
 ];
 
+// Pomoćna funkcija za rezoluciju naziva ili placeholdera mapa u stvarni Google Drive ID
+async function resolveFolderId(drive, folderIdOrName) {
+  if (!folderIdOrName || folderIdOrName === 'root') return folderIdOrName;
+  
+  const placeholders = ['PORTRAITS_TISAK_FOLDER_ID', 'PORTRAITS_WEB_FOLDER_ID', 'MAIN_FOLDER_ID', 'PORTRAITS_FOLDER_ID'];
+  const isPlaceholder = placeholders.includes(folderIdOrName);
+  const isLikelyId = /^[a-zA-Z0-9-_]{19,45}$/.test(folderIdOrName);
+  
+  if (isPlaceholder || !isLikelyId) {
+    try {
+      console.log(`[Drive-Resolve] Tražim mapu po nazivu na Google Driveu: "${folderIdOrName}"`);
+      const res = await drive.files.list({
+        q: `name = '${folderIdOrName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id, name)',
+        pageSize: 1
+      });
+      const files = res.data.files || [];
+      if (files.length > 0) {
+        console.log(`[Drive-Resolve] Pronađena mapa "${folderIdOrName}" s ID-jem: ${files[0].id}`);
+        return files[0].id;
+      } else {
+        console.log(`[Drive-Resolve] Mapa s nazivom "${folderIdOrName}" nije pronađena, koristim izvornu vrijednost.`);
+      }
+    } catch (err) {
+      console.warn(`[Drive-Resolve] Greška pri traženju mape "${folderIdOrName}":`, err.message);
+    }
+  }
+  
+  return folderIdOrName;
+}
+
 // ─── Middleware: provjera autentifikacije ────────────────────────────────────
 function requireAuth(req, res, next) {
   if (!req.session || !req.session.encryptedRefreshToken) {
@@ -44,9 +75,10 @@ router.get('/folders', async (req, res) => {
   try {
     const { parentId = 'root', pageToken } = req.query;
     const drive = await getDriveClient(req.session);
+    const resolvedParentId = await resolveFolderId(drive, parentId);
 
     const params = {
-      q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      q: `'${resolvedParentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
       fields: 'nextPageToken, files(id, name, modifiedTime)',
       orderBy: 'name',
       pageSize: 100
@@ -73,12 +105,13 @@ router.post('/file/:id/copy', express.json(), async (req, res) => {
     if (!outputFolderId) return res.status(400).json({ error: 'Nedostaje outputFolderId.' });
 
     const drive = await getDriveClient(req.session);
+    const resolvedOutputFolderId = await resolveFolderId(drive, outputFolderId);
 
     // 1. Pretraži datoteke u mapi kako bismo izračunali zadnji redni broj
     let maxSeq = 0;
     try {
       const filesResponse = await drive.files.list({
-        q: `'${outputFolderId}' in parents and name contains 'Antunovac-u-slici-' and trashed = false`,
+        q: `'${resolvedOutputFolderId}' in parents and name contains 'Antunovac-u-slici-' and trashed = false`,
         fields: 'files(name)',
         pageSize: 1000
       });
@@ -112,7 +145,7 @@ router.post('/file/:id/copy', express.json(), async (req, res) => {
       fileId: originalDriveId,
       requestBody: {
         name: computedFilename,
-        parents: [outputFolderId]
+        parents: [resolvedOutputFolderId]
       },
       fields: 'id, name, webViewLink, thumbnailLink'
     });
@@ -130,10 +163,11 @@ router.get('/files', async (req, res) => {
   try {
     const { folderId = 'root', pageToken, pageSize = 50 } = req.query;
     const drive = await getDriveClient(req.session);
+    const resolvedFolderId = await resolveFolderId(drive, folderId);
 
     const mimeQuery = IMAGE_MIME_TYPES.map(m => `mimeType = '${m}'`).join(' or ');
     const params = {
-      q: `'${folderId}' in parents and (${mimeQuery}) and trashed = false`,
+      q: `'${resolvedFolderId}' in parents and (${mimeQuery}) and trashed = false`,
       fields: 'nextPageToken, files(id, name, size, mimeType, modifiedTime, imageMediaMetadata, thumbnailLink)',
       orderBy: 'name',
       pageSize: parseInt(pageSize)
@@ -397,6 +431,13 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
   try {
     const drive = await getDriveClient(req.session);
 
+    const resolvedTisakFolderId = await resolveFolderId(drive, tisakFolderId);
+    const resolvedWebFolderId = await resolveFolderId(drive, webFolderId);
+
+    if (!resolvedTisakFolderId || !resolvedWebFolderId) {
+      return res.status(400).json({ error: 'Nije moguće razriješiti ID-jeve mapa za spremanje.' });
+    }
+
     // 1. Dohvati metapodatke o datoteci radi točnog formata (mimeType)
     const fileMetadata = await drive.files.get({
       fileId: id,
@@ -480,12 +521,12 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
         fields: 'id, name, webViewLink'
       });
     } else {
-      const finalFilenameTisak = await resolveFilenameConflict(drive, tisakFolderId, filename);
-      console.log(`[CropAndUpload] Kreiranje novog TISAK portreta: ${finalFilenameTisak} u mapi: ${tisakFolderId}`);
+      const finalFilenameTisak = await resolveFilenameConflict(drive, resolvedTisakFolderId, filename);
+      console.log(`[CropAndUpload] Kreiranje novog TISAK portreta: ${finalFilenameTisak} u mapi: ${resolvedTisakFolderId}`);
       tisakResponse = await drive.files.create({
         requestBody: {
           name: finalFilenameTisak,
-          parents: [tisakFolderId]
+          parents: [resolvedTisakFolderId]
         },
         media: {
           mimeType: originalMimeType,
@@ -510,12 +551,12 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
         fields: 'id, name, webViewLink'
       });
     } else {
-      const finalFilenameWeb = await resolveFilenameConflict(drive, webFolderId, webFilename);
-      console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${webFolderId}`);
+      const finalFilenameWeb = await resolveFilenameConflict(drive, resolvedWebFolderId, webFilename);
+      console.log(`[CropAndUpload] Kreiranje novog WEB portreta: ${finalFilenameWeb} u mapi: ${resolvedWebFolderId}`);
       webResponse = await drive.files.create({
         requestBody: {
           name: finalFilenameWeb,
-          parents: [webFolderId]
+          parents: [resolvedWebFolderId]
         },
         media: {
           mimeType: 'image/webp',
@@ -571,11 +612,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     const drive = await getDriveClient(req.session);
+    const resolvedFolderId = await resolveFolderId(drive, folderId);
+    if (!resolvedFolderId) {
+      return res.status(400).json({ error: 'Nije moguće razriješiti ID ciljne mape.' });
+    }
 
     // Provjera konflikta naziva datoteke (samo kod kreiranja)
     let finalFilename = filename || req.file?.originalname || 'upload.jpg';
     if (!fileId) {
-      finalFilename = await resolveFilenameConflict(drive, folderId, finalFilename);
+      finalFilename = await resolveFilenameConflict(drive, resolvedFolderId, finalFilename);
     }
 
     // Pripremi sadržaj
@@ -609,7 +654,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       response = await drive.files.create({
         requestBody: {
           name: finalFilename,
-          parents: [folderId]
+          parents: [resolvedFolderId]
         },
         media: {
           mimeType: mimeType,

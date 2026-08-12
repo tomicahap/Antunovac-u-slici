@@ -213,8 +213,9 @@ const Tags = (function () {
 
   async function saveCurrentImageToDrive() {
     const settings = DB.getSettings();
-    if (!settings.outputFolderId) {
-      UI.toast('Odaberite izlaznu mapu u Postavkama.', 'warning');
+    const targetOutputFolderId = settings.outputFolderId || settings.inputFolderId;
+    if (!targetOutputFolderId) {
+      UI.toast('Odaberite početnu mapu s originalnim slikama u Postavkama.', 'warning');
       UI.showView('settings');
       return false;
     }
@@ -242,7 +243,7 @@ const Tags = (function () {
          // Slika još nije spremljena
          const cleanBlob = await CanvasEngine.exportCleanImage();
          const outputFilename = `slika_${globalImageSequence}${ext}`;
-         const uploadResult = await DriveAPI.uploadBlob(settings.outputFolderId, outputFilename, cleanBlob);
+         const uploadResult = await DriveAPI.uploadBlob(targetOutputFolderId, outputFilename, cleanBlob);
          
          imageRec = DB.saveImage({
            id: imageRec?.id,
@@ -268,7 +269,7 @@ const Tags = (function () {
 
       // 2. Kreiraj podmapu za portrete ako ne postoji
       const portraitsFolder = await DriveAPI.createFolder(
-        settings.outputFolderId,
+        targetOutputFolderId,
         settings.portraitsSubfolder || 'Portreti'
       );
 
