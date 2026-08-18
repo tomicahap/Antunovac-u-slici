@@ -11,6 +11,16 @@ const { getDriveClient, getAuthenticatedClient } = require('../utils/driveClient
 const { isTiff, tiffToJpeg } = require('../utils/tiffConverter');
 const firebaseDb = require('../utils/firebase');
 const sharp = require('sharp');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { pipeline } = require('stream/promises');
+
+// Lokalni cache za slike s Google Drivea (ubrzava učitavanje galerije i portreta)
+const cacheDir = path.join(os.tmpdir(), 'antunovac_drive_cache');
+if (!fs.existsSync(cacheDir)) {
+  fs.mkdirSync(cacheDir, { recursive: true });
+}
 
 // Ograničavanje memorije za sharp (Render 512MB RAM OOM zaštita)
 sharp.cache(false);
@@ -59,19 +69,29 @@ async function resolveFolderId(drive, folderIdOrName) {
   return folderIdOrName;
 }
 
-// ─── Middleware: provjera autentifikacije ────────────────────────────────────
-function requireAuth(req, res, next) {
+// ─── Middleware: Stroga provjera za admina (izmjene, folder pickeri, brisanje) ──────
+function requireAdminAuth(req, res, next) {
   if (!req.session || !req.session.encryptedRefreshToken) {
-    return res.status(401).json({ error: 'Niste prijavljeni. Povežite Google Drive.' });
+    return res.status(401).json({ error: 'Niste prijavljeni kao administrator.' });
   }
   next();
 }
 
-router.use(requireAuth);
+// ─── Middleware: Labava provjera za posjetitelje (samo čitanje i prikaz) ────────────
+function requireReadAuth(req, res, next) {
+  const hasSession = req.session && req.session.encryptedRefreshToken;
+  const hasEnvToken = !!process.env.GOOGLE_REFRESH_TOKEN;
+  const hasServiceAccount = !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  
+  if (!hasSession && !hasEnvToken && !hasServiceAccount) {
+    return res.status(401).json({ error: 'Niste prijavljeni, a javni posjetiteljski način nije konfiguriran.' });
+  }
+  next();
+}
 
 // ─── GET /api/drive/folders ──────────────────────────────────────────────────
 // Popis podmapa zadane mape (ili My Drive root)
-router.get('/folders', async (req, res) => {
+router.get('/folders', requireAdminAuth, async (req, res) => {
   try {
     const { parentId = 'root', pageToken } = req.query;
     const drive = await getDriveClient(req.session);
@@ -98,7 +118,7 @@ router.get('/folders', async (req, res) => {
 
 // ─── POST /api/drive/file/:id/copy ───────────────────────────────────────────
 // Kopiranje slike u drugi folder sa automatskim rednim brojem na temelju sadržaja mape
-router.post('/file/:id/copy', express.json(), async (req, res) => {
+router.post('/file/:id/copy', requireAdminAuth, express.json(), async (req, res) => {
   try {
     const originalDriveId = req.params.id;
     const { outputFolderId } = req.body;
@@ -159,7 +179,7 @@ router.post('/file/:id/copy', express.json(), async (req, res) => {
 
 // ─── GET /api/drive/files ────────────────────────────────────────────────────
 // Popis slika u zadanoj mapi
-router.get('/files', async (req, res) => {
+router.get('/files', requireReadAuth, async (req, res) => {
   try {
     const { folderId = 'root', pageToken, pageSize = 50 } = req.query;
     const drive = await getDriveClient(req.session);
@@ -187,7 +207,7 @@ router.get('/files', async (req, res) => {
 
 // ─── GET /api/drive/file/:id/metadata ───────────────────────────────────────
 // Metapodaci pojedine datoteke
-router.get('/file/:id/metadata', async (req, res) => {
+router.get('/file/:id/metadata', requireReadAuth, async (req, res) => {
   try {
     const drive = await getDriveClient(req.session);
     const response = await drive.files.get({
@@ -204,11 +224,27 @@ router.get('/file/:id/metadata', async (req, res) => {
 // ─── GET /api/drive/file/:id/download ───────────────────────────────────────
 // Preuzimanje/proxy sadržaja datoteke
 // Za TIFF datoteke: automatska konverzija u JPEG
-router.get('/file/:id/download', async (req, res) => {
+router.get('/file/:id/download', requireReadAuth, async (req, res) => {
   try {
-    const drive = await getDriveClient(req.session);
     const { id } = req.params;
     const { convert = 'true' } = req.query; // convert=false za preuzimanje originala
+    const cacheKey = `download_${id}_${convert}`;
+    const cachedPath = path.join(cacheDir, cacheKey);
+    const metaCachePath = path.join(cacheDir, `${cacheKey}.meta`);
+
+    // 1. Provjeri lokalni cache
+    if (fs.existsSync(cachedPath) && fs.existsSync(metaCachePath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaCachePath, 'utf8'));
+        res.set(meta.headers);
+        fs.createReadStream(cachedPath).pipe(res);
+        return;
+      } catch (cacheErr) {
+        console.warn('[Cache] Greška pri čitanju cachea, ponovno preuzimam:', cacheErr.message);
+      }
+    }
+
+    const drive = await getDriveClient(req.session);
 
     // Dohvati metapodatke
     const metaResponse = await drive.files.get({
@@ -217,7 +253,7 @@ router.get('/file/:id/download', async (req, res) => {
     });
     const fileMeta = metaResponse.data;
 
-    // Preuzmi sadržaj
+    // Preuzmi sadržaj s Drivea
     const fileResponse = await drive.files.get(
       { fileId: id, alt: 'media' },
       { responseType: 'stream' }
@@ -234,13 +270,19 @@ router.get('/file/:id/download', async (req, res) => {
           const tiffBuffer = Buffer.concat(chunks);
           const { buffer: jpegBuffer } = await tiffToJpeg(tiffBuffer);
           
-          res.set({
+          const headers = {
             'Content-Type': 'image/jpeg',
-            'Content-Length': jpegBuffer.length,
+            'Content-Length': jpegBuffer.length.toString(),
             'Cache-Control': 'public, max-age=31536000, immutable',
             'X-Original-Format': 'tiff',
             'X-Original-Filename': fileMeta.name
-          });
+          };
+
+          // Upiši u cache
+          fs.writeFileSync(cachedPath, jpegBuffer);
+          fs.writeFileSync(metaCachePath, JSON.stringify({ headers }));
+
+          res.set(headers);
           res.send(jpegBuffer);
         } catch (convErr) {
           console.error('[Drive] TIFF konverzija neuspješna:', convErr.message);
@@ -252,13 +294,21 @@ router.get('/file/:id/download', async (req, res) => {
         res.status(500).json({ error: 'Greška pri preuzimanju datoteke.' });
       });
     } else {
-      // Direktni proxy streama
-      res.set({
+      // Preuzmi originalnu sliku i spremi u cache, pa posluži
+      const tempPath = `${cachedPath}.tmp`;
+      const writeStream = fs.createWriteStream(tempPath);
+      await pipeline(fileResponse.data, writeStream);
+      fs.renameSync(tempPath, cachedPath);
+
+      const headers = {
         'Content-Type': fileMeta.mimeType || 'application/octet-stream',
         'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Original-Filename': fileMeta.name
-      });
-      fileResponse.data.pipe(res);
+      };
+      fs.writeFileSync(metaCachePath, JSON.stringify({ headers }));
+
+      res.set(headers);
+      fs.createReadStream(cachedPath).pipe(res);
     }
   } catch (err) {
     console.error('[Drive] Greška pri preuzimanju:', err.message);
@@ -268,11 +318,27 @@ router.get('/file/:id/download', async (req, res) => {
 
 // ─── GET /api/drive/file/:id/thumbnail ──────────────────────────────────────
 // Thumbnail slike za galerijski prikaz (manja verzija)
-router.get('/file/:id/thumbnail', async (req, res) => {
+router.get('/file/:id/thumbnail', requireReadAuth, async (req, res) => {
   try {
-    const drive = await getDriveClient(req.session);
     const { id } = req.params;
     const { size = 200 } = req.query;
+    const cacheKey = `thumb_${id}_${size}`;
+    const cachedPath = path.join(cacheDir, cacheKey);
+    const metaCachePath = path.join(cacheDir, `${cacheKey}.meta`);
+
+    // 1. Provjeri lokalni cache
+    if (fs.existsSync(cachedPath) && fs.existsSync(metaCachePath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaCachePath, 'utf8'));
+        res.set(meta.headers);
+        fs.createReadStream(cachedPath).pipe(res);
+        return;
+      } catch (cacheErr) {
+        console.warn('[Cache] Greška pri čitanju thumbnail cachea, ponovno preuzimam:', cacheErr.message);
+      }
+    }
+
+    const drive = await getDriveClient(req.session);
 
     const metaResponse = await drive.files.get({
       fileId: id,
@@ -282,7 +348,6 @@ router.get('/file/:id/thumbnail', async (req, res) => {
 
     if (fileMeta.thumbnailLink) {
       const targetSize = parseInt(size, 10);
-      // Google-ovi linkovi imaju sufiks npr. =s220 ili =s220-c. Zamjenjujemo to sa ciljanom veličinom.
       const thumbUrl = fileMeta.thumbnailLink.replace(/=s\d+(?:-c)?$/, `=s${targetSize}`);
       
       const auth = await getAuthenticatedClient(req.session);
@@ -291,14 +356,22 @@ router.get('/file/:id/thumbnail', async (req, res) => {
         responseType: 'stream'
       });
 
-      res.set({
-        'Content-Type': 'image/jpeg', // Google thumbnaili su uvijek JPEG
+      const tempPath = `${cachedPath}.tmp`;
+      const writeStream = fs.createWriteStream(tempPath);
+      await pipeline(response.data, writeStream);
+      fs.renameSync(tempPath, cachedPath);
+
+      const headers = {
+        'Content-Type': 'image/jpeg',
         'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Original-Filename': fileMeta.name
-      });
-      response.data.pipe(res);
+      };
+      fs.writeFileSync(metaCachePath, JSON.stringify({ headers }));
+
+      res.set(headers);
+      fs.createReadStream(cachedPath).pipe(res);
     } else {
-      // Ako nema pre-generiranog thumbnail-a, preuzmi original i pošalji ga
+      // Ako nema pre-generiranog thumbnail-a, preuzmi original i pošalji ga (također keširamo)
       const fileResponse = await drive.files.get(
         { fileId: id, alt: 'media' },
         { responseType: 'stream' }
@@ -318,7 +391,7 @@ router.get('/file/:id/thumbnail', async (req, res) => {
 
 // ─── POST /api/drive/file/:id/crop ──────────────────────────────────────
 // Izrezivanje (crop) originalne slike na serveru (čuva TIFF kvalitetu) - OOM optimizirano
-router.post('/file/:id/crop', express.json(), async (req, res) => {
+router.post('/file/:id/crop', requireAdminAuth, express.json(), async (req, res) => {
   const os = require('os');
   const fs = require('fs');
   const path = require('path');
@@ -409,7 +482,7 @@ router.post('/file/:id/crop', express.json(), async (req, res) => {
 
 // ─── POST /api/drive/file/:id/crop-and-upload ────────────────────────────
 // Izrezivanje i izravan prijenos na Google Drive s poslužitelja (bez slanja klijentu) - OOM optimizirano
-router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
+router.post('/file/:id/crop-and-upload', requireAdminAuth, express.json(), async (req, res) => {
   const os = require('os');
   const fs = require('fs');
   const path = require('path');
@@ -600,7 +673,7 @@ router.post('/file/:id/crop-and-upload', express.json(), async (req, res) => {
 
 // ─── POST /api/drive/upload ──────────────────────────────────────────────────
 // Upload datoteke u Google Drive mapu
-router.post('/upload', upload.single('file'), async (req, res) => {
+router.post('/upload', requireAdminAuth, upload.single('file'), async (req, res) => {
   try {
     const { folderId, filename, mimeType = 'image/jpeg', fileId } = req.body;
 
@@ -677,7 +750,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 // Izbriši datoteku iz Google Drivea
-router.delete('/file/:id', async (req, res) => {
+router.delete('/file/:id', requireAdminAuth, async (req, res) => {
   try {
     const drive = await getDriveClient(req.session);
     const { id } = req.params;
@@ -691,7 +764,7 @@ router.delete('/file/:id', async (req, res) => {
 
 // ─── POST /api/drive/folder ──────────────────────────────────────────────────
 // Kreiranje podmape u Google Drive-u
-router.post('/folder', async (req, res) => {
+router.post('/folder', requireAdminAuth, async (req, res) => {
   try {
     const { parentId, name } = req.body;
     if (!parentId || !name) {
@@ -739,7 +812,7 @@ router.post('/folder', async (req, res) => {
 
 // ─── GET /api/drive/resolve ──────────────────────────────────────────────────
 // Parsiranje Google Drive URL-a → file ID ili folder ID
-router.get('/resolve', async (req, res) => {
+router.get('/resolve', requireReadAuth, async (req, res) => {
   try {
     const { url } = req.query;
     if (!url) {
@@ -775,7 +848,7 @@ router.get('/resolve', async (req, res) => {
 
 // ─── GET /api/drive/check-name ───────────────────────────────────────────────
 // Provjera dostupnosti naziva datoteke u mapi
-router.get('/check-name', async (req, res) => {
+router.get('/check-name', requireReadAuth, async (req, res) => {
   try {
     const { folderId, filename } = req.query;
     if (!folderId || !filename) {
@@ -853,14 +926,12 @@ async function resolveFilenameConflict(drive, folderId, desiredFilename) {
   return `${nameWithoutExt}_${Date.now()}${ext}`;
 }
 
-const fs = require('fs');
-const path = require('path');
 const dbFile = path.join(__dirname, '..', 'data', 'db.json');
 
 
 // ─── GET /api/drive/db/load ──────────────────────────────────────────────────
 // Učitava bazu podataka s Firebase Firestore ili iz lokalnog fallbacka
-router.get('/db/load', async (req, res) => {
+router.get('/db/load', requireReadAuth, async (req, res) => {
   try {
     const data = await firebaseDb.loadAll();
     res.json(data);
@@ -872,7 +943,7 @@ router.get('/db/load', async (req, res) => {
 
 // ─── GET /api/drive/db/query ──────────────────────────────────────────────────
 // Paginirani i filtrirani upiti za portrete i slike iz baze (Firestore ili lokalni fallback)
-router.get('/db/query', async (req, res) => {
+router.get('/db/query', requireReadAuth, async (req, res) => {
   try {
     const { tab, subtab, limit = 30, startAfter, search } = req.query;
     const limitNum = parseInt(limit, 10);
@@ -1008,7 +1079,7 @@ router.get('/db/query', async (req, res) => {
 
 // ─── POST /api/drive/db/save-item ────────────────────────────────────────────
 // Granularno spremanje jedne stavke u Firestore
-router.post('/db/save-item', express.json({ limit: '5mb' }), async (req, res) => {
+router.post('/db/save-item', requireAdminAuth, express.json({ limit: '5mb' }), async (req, res) => {
   try {
     const { collection, id, data } = req.body;
     if (!collection || !id || !data) {
@@ -1024,7 +1095,7 @@ router.post('/db/save-item', express.json({ limit: '5mb' }), async (req, res) =>
 
 // ─── POST /api/drive/db/delete-item ──────────────────────────────────────────
 // Granularno brisanje jedne stavke iz Firestorea
-router.post('/db/delete-item', express.json(), async (req, res) => {
+router.post('/db/delete-item', requireAdminAuth, express.json(), async (req, res) => {
   try {
     const { collection, id } = req.body;
     if (!collection || !id) {
@@ -1040,7 +1111,7 @@ router.post('/db/delete-item', express.json(), async (req, res) => {
 
 // ─── POST /api/drive/db/clear-collection ─────────────────────────────────────
 // Grupno brisanje cijele kolekcije
-router.post('/db/clear-collection', express.json(), async (req, res) => {
+router.post('/db/clear-collection', requireAdminAuth, express.json(), async (req, res) => {
   try {
     const { collection } = req.body;
     if (!collection) {
@@ -1056,7 +1127,7 @@ router.post('/db/clear-collection', express.json(), async (req, res) => {
 
 // ─── POST /api/drive/db/save ─────────────────────────────────────────────────
 // Sprema cjelokupnu bazu (zadržano radi kompatibilnosti)
-router.post('/db/save', express.json({ limit: '10mb' }), async (req, res) => {
+router.post('/db/save', requireAdminAuth, express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const dbData = req.body;
     if (!dbData) return res.status(400).json({ error: 'Nedostaje sadržaj baze.' });

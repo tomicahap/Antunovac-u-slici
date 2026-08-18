@@ -144,7 +144,7 @@ const DriveAPI = (function () {
    */
   function getImageUrl(fileId, convert = false) {
     if (!fileId) return '';
-    return `${BASE}/drive/file/${fileId}/download?convert=${convert}&t=${Date.now()}`;
+    return `${BASE}/drive/file/${fileId}/download?convert=${convert}`;
   }
 
   /**
@@ -154,7 +154,7 @@ const DriveAPI = (function () {
    */
   function getThumbnailUrl(fileId, size = 200) {
     if (!fileId) return '';
-    return `${BASE}/drive/file/${fileId}/thumbnail?size=${size}&t=${Date.now()}`;
+    return `${BASE}/drive/file/${fileId}/thumbnail?size=${size}`;
   }
 
   /**
