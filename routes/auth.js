@@ -223,8 +223,24 @@ router.post('/oauth-config', (req, res) => {
 // ─── POST /api/auth/logout ───────────────────────────────────────────────────
 // Brisanje sesije (logout)
 router.post('/logout', (req, res) => {
-  req.session = null; // cookie-session brisanje
-  res.json({ success: true, message: 'Odjava uspješna.' });
+  try {
+    req.session = null; // cookie-session brisanje
+    global.adminSession = null; // Brisanje iz memorije
+    
+    // Obriši session.json datoteku s diska ako postoji
+    const fs = require('fs');
+    const path = require('path');
+    const sessionFile = path.join(__dirname, '..', 'data', 'session.json');
+    if (fs.existsSync(sessionFile)) {
+      fs.unlinkSync(sessionFile);
+      console.log('[Auth] session.json obrisan s diska.');
+    }
+    
+    res.json({ success: true, message: 'Odjava uspješna.' });
+  } catch (err) {
+    console.error('[Auth] Greška pri odjavi:', err.message);
+    res.status(500).json({ error: 'Greška pri odjavi: ' + err.message });
+  }
 });
 
 // ─── POST /api/auth/credentials ──────────────────────────────────────────────

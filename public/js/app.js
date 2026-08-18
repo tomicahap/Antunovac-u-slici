@@ -50,8 +50,8 @@ const App = (function () {
       try {
         config = await DriveAPI.getConfig();
         if (config.appVersion) {
-          const badge = document.getElementById('app-version-badge');
-          if (badge) badge.textContent = `v${config.appVersion}`;
+          const footer = document.getElementById('app-version-footer');
+          if (footer) footer.textContent = `Verzija v${config.appVersion}`;
           const settingsText = document.getElementById('settings-version-text');
           if (settingsText) settingsText.textContent = `(Verzija: ${config.appVersion})`;
         }
@@ -338,11 +338,18 @@ const App = (function () {
     if (!confirmed) return;
     try {
       await DriveAPI.logout();
-    } catch {}
+    } catch (e) {
+      console.warn('[Logout] Greška pri mrežnoj odjavi:', e);
+    }
+    // Bezuvjetno čišćenje lokalnog stanja
     _authStatus = { authenticated: false, user: null };
     setUserRole('visitor');
-    renderAuthSection();
-    UI.toast('Odjavljen. Prikaz je preklopljen na Posjetitelja.', 'info');
+    localStorage.removeItem('agf_user_role');
+    
+    UI.toast('Odjava uspješna. Ponovno učitavam stranicu...', 'info');
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 1000);
   }
 
   function handleUrlParams() {

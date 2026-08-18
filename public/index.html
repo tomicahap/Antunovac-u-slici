@@ -54,7 +54,7 @@
   <nav class="navbar" id="main-navbar">
     <div class="nav-brand">
       <img src="/thumbs/antunovac_znak.gif" alt="Antunovac u slici logo" class="nav-logo-img">
-      <span class="nav-brand-text">Antunovac u slici <small id="app-version-badge" style="font-size: 0.65rem; color: var(--text-muted); opacity: 0.8; font-weight: normal; margin-left: 6px; border: 1px solid var(--border); padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,0.03);">v1.00</small></span>
+      <span class="nav-brand-text">Antunovac u slici</span>
     </div>
 
     <button class="nav-hamburger" id="nav-hamburger" aria-label="Izbornik" aria-expanded="false">
@@ -1064,6 +1064,9 @@
     <p id="loading-msg">Učitavanje...</p>
   </div>
 </div>
+
+<!-- Plutajući indikator verzije na dnu ekrana -->
+<div id="app-version-footer" style="position: fixed; bottom: 12px; right: 16px; font-size: 0.85rem; color: var(--text-secondary); opacity: 0.9; z-index: 10000; font-weight: 600; font-family: var(--font-family); background: var(--bg-elevated); border: 1px solid var(--border-strong); padding: 5px 12px; border-radius: 4px; box-shadow: var(--shadow-sm); pointer-events: none;">Verzija --</div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
      JAVASCRIPT – redoslijed učitavanja je važan

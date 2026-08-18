@@ -93,17 +93,18 @@ async function getAuthenticatedClient(session) {
   let refreshToken = null;
   if (activeSession && activeSession.encryptedRefreshToken) {
     refreshToken = decrypt(activeSession.encryptedRefreshToken);
-  } else if (process.env.GOOGLE_REFRESH_TOKEN) {
+  }
+
+  // Fallback na GOOGLE_REFRESH_TOKEN
+  if (!refreshToken && process.env.GOOGLE_REFRESH_TOKEN) {
     refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-    if (!activeSession) {
-      if (!global.adminSession) {
-        global.adminSession = {
-          accessToken: null,
-          tokenExpiry: null
-        };
-      }
-      activeSession = global.adminSession;
+    if (!global.adminSession) {
+      global.adminSession = {
+        accessToken: null,
+        tokenExpiry: null
+      };
     }
+    activeSession = global.adminSession;
   }
 
   if (!refreshToken) {
