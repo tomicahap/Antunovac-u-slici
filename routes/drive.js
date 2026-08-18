@@ -954,19 +954,20 @@ router.get('/db/query', requireReadAuth, async (req, res) => {
     const searchQuery = (search || '').toLowerCase().trim();
 
     if (tab === 'portraits') {
-      // 1. Filtriraj portrete (tagove koji imaju person_id ili person_ime)
-      let portraits = data.tags.filter(t => t.person_id || t.person_ime);
+      // 1. Filtriraj portrete (tagove koji imaju person_id, person_ime, manualName ili ime)
+      let portraits = data.tags.filter(t => t && (t.person_id || t.person_ime || t.manualName || t.ime));
 
       if (searchQuery) {
         portraits = portraits.filter(t => {
-          const ime = (t.person_ime || '').toLowerCase();
+          if (!t) return false;
+          const ime = (t.person_ime || t.manualName || t.ime || '').toLowerCase();
           const prezime = (t.person_prezime || '').toLowerCase();
           const fullName = `${ime} ${prezime}`;
           const years = `${t.person_godina_rodenja || ''} ${t.person_godina_smrti || ''}`;
           
           let personNote = '';
           if (t.person_id) {
-            const p = data.persons.find(pers => pers.id === t.person_id);
+            const p = data.persons.find(pers => pers && pers.id === t.person_id);
             if (p) personNote = (p.napomena || '').toLowerCase();
           }
 
@@ -975,12 +976,16 @@ router.get('/db/query', requireReadAuth, async (req, res) => {
       }
 
       // Sortiraj po id-u silazno
-      portraits.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
+      portraits.sort((a, b) => {
+        const idA = a && a.id ? a.id : '';
+        const idB = b && b.id ? b.id : '';
+        return idB.localeCompare(idA);
+      });
 
       // Paginacija
       let startIndex = 0;
       if (startAfter) {
-        const index = portraits.findIndex(p => p.id === startAfter);
+        const index = portraits.findIndex(p => p && p.id === startAfter);
         if (index !== -1) {
           startIndex = index + 1;
         }
@@ -992,8 +997,8 @@ router.get('/db/query', requireReadAuth, async (req, res) => {
       // Vrati i povezane osobe kako bi klijent imao sve podatke
       const personsMap = {};
       paginated.forEach(t => {
-        if (t.person_id) {
-          const p = data.persons.find(pers => pers.id === t.person_id);
+        if (t && t.person_id) {
+          const p = data.persons.find(pers => pers && pers.id === t.person_id);
           if (p) personsMap[p.id] = p;
         }
       });

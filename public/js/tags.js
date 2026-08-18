@@ -198,15 +198,15 @@ const Tags = (function () {
     for (const tag of tags) await downloadPortrait(tag);
   }
 
-  function buildPortraitFilename(person, originalFilename, imageSequenceNo, tagIndex = 0) {
+  function buildPortraitFilename(person, originalFilename, imageSequenceNo, tagIndex = 0, tag = null) {
     const lastDot = originalFilename ? originalFilename.lastIndexOf('.') : -1;
     const ext = lastDot > -1 ? originalFilename.slice(lastDot) : '.jpg';
     
-    const ime = (person.ime || '').trim().replace(/\s+/g, '_');
-    const prezime = (person.prezime || '').trim().replace(/\s+/g, '_');
+    const ime = ((person?.ime || tag?.person_ime || tag?.manualName || tag?.ime || 'portret').trim()).replace(/\s+/g, '_');
+    const prezime = ((person?.prezime || tag?.person_prezime || '').trim()).replace(/\s+/g, '_');
     
     const suffix = tagIndex > 0 ? `_${tagIndex}` : '';
-    return `${ime}_${prezime}_slika_${imageSequenceNo}${suffix}${ext}`;
+    return `${ime}${prezime ? '_' + prezime : ''}_slika_${imageSequenceNo}${suffix}${ext}`;
   }
 
   // ─── Spremi na Drive ───────────────────────────────────────────────────────
@@ -281,12 +281,15 @@ const Tags = (function () {
       const personCounts = {};
 
       for (const tag of tags) {
+        if (!tag) continue;
         try {
-          const person = DB.getPersonById(tag.person_id);
-          if (!person) continue;
+          const person = tag.person_id ? DB.getPersonById(tag.person_id) : null;
+          const displayName = person ? `${person.ime || ''} ${person.prezime || ''}`.trim() : (tag.person_ime || tag.manualName || tag.ime || '');
+          if (!displayName) continue;
 
-          personCounts[person.id] = (personCounts[person.id] || 0) + 1;
-          const tagIndex = personCounts[person.id] - 1;
+          const personKey = person ? person.id : `manual_${displayName.replace(/\s+/g, '_')}`;
+          personCounts[personKey] = (personCounts[personKey] || 0) + 1;
+          const tagIndex = personCounts[personKey] - 1;
 
           // Provjeri je li oznaka nepromijenjena u odnosu na zadnje spremanje
           const isUnchanged = tag.portrait_drive_id &&
@@ -305,7 +308,7 @@ const Tags = (function () {
           const portraitsTisakFolderId = settings.portraitsTisakFolderId || portraitsFolder.folderId;
           const portraitsWebFolderId = settings.portraitsWebFolderId || portraitsFolder.folderId;
 
-          const portraitFilename = buildPortraitFilename(person, meta.name, imageRec.sequence_no || globalImageSequence - 1, tagIndex);
+          const portraitFilename = buildPortraitFilename(person, meta.name, imageRec.sequence_no || globalImageSequence - 1, tagIndex, tag);
           const fileId = imageRec.output_drive_id || imageRec.original_drive_id || _currentImageId;
 
           // Pozovi backend API da izreže i učita sliku u jednom koraku

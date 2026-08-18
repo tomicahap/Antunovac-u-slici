@@ -49,6 +49,12 @@ const App = (function () {
       let config = {};
       try {
         config = await DriveAPI.getConfig();
+        if (config.appVersion) {
+          const badge = document.getElementById('app-version-badge');
+          if (badge) badge.textContent = `v${config.appVersion}`;
+          const settingsText = document.getElementById('settings-version-text');
+          if (settingsText) settingsText.textContent = `(Verzija: ${config.appVersion})`;
+        }
       } catch (e) {
         console.warn('[App] Config nedostupan:', e.message);
       }
@@ -537,6 +543,7 @@ const App = (function () {
         if (loadMoreEl) loadMoreEl.style.display = _dbHasMore ? '' : 'none';
 
         _portraitsList.forEach(tag => {
+          if (!tag) return;
           const person = tag.person_id ? DB.getPersonById(tag.person_id) : null;
           if (gridPortraits) {
             gridPortraits.appendChild(createPortraitItem(tag, person));
@@ -649,11 +656,11 @@ const App = (function () {
     el.style.transition = 'transform 0.2s, box-shadow 0.2s';
     el.style.cursor = 'pointer';
 
-    const name = `${person.ime || ''} ${person.prezime || ''}`.trim() || 'Nepoznata osoba';
-    const birthStr = person.godina_rodenja ? person.godina_rodenja : '?';
-    const deathStr = person.godina_smrti ? person.godina_smrti : '?';
+    const name = `${person?.ime || tag?.person_ime || tag?.manualName || tag?.ime || ''} ${person?.prezime || tag?.person_prezime || ''}`.trim() || 'Nepoznata osoba';
+    const birthStr = person?.godina_rodenja || tag?.person_godina_rodenja || '?';
+    const deathStr = person?.godina_smrti || tag?.person_godina_smrti || '?';
     let lifespan = '';
-    if (person.godina_rodenja || person.godina_smrti) {
+    if (person?.godina_rodenja || person?.godina_smrti || tag?.person_godina_rodenja || tag?.person_godina_smrti) {
       lifespan = `(${birthStr} - ${deathStr})`;
     }
 
@@ -741,9 +748,10 @@ const App = (function () {
     if (tagCount > 0) {
       tagsHtml = '<div style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">';
       tags.forEach(t => {
-        const p = DB.getPersonById(t.person_id);
-        const name = p ? UI.formatPersonName(p) : 'Nepoznato';
-        const years = p ? ((p.godina_rodenja || '?') + ' - ' + (p.godina_smrti || '?')) : '';
+        if (!t) return;
+        const p = t.person_id ? DB.getPersonById(t.person_id) : null;
+        const name = p ? UI.formatPersonName(p) : `${t.person_ime || t.manualName || t.ime || ''} ${t.person_prezime || ''}`.trim() || 'Nepoznata osoba';
+        const years = p ? ((p.godina_rodenja || '?') + ' - ' + (p.godina_smrti || '?')) : (t.person_godina_rodenja ? ((t.person_godina_rodenja || '?') + ' - ' + (t.person_godina_smrti || '?')) : '');
         const portThumb = t.portrait_drive_id 
           ? DriveAPI.getThumbnailUrl(t.portrait_drive_id, 100)
           : thumbUrl;

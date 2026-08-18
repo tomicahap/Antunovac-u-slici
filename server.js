@@ -14,6 +14,24 @@ const authRoutes = require('./routes/auth');
 const driveRoutes = require('./routes/drive');
 const firebaseDb = require('./utils/firebase');
 
+const APP_VERSION = '1.02';
+
+// ─── Firebase verzija sync ───────────────────────────────────────────────────
+(async () => {
+  try {
+    if (firebaseDb.isEnabled()) {
+      const currentSettings = await firebaseDb.loadDoc('settings', 'app_settings') || {};
+      if (currentSettings.appVersion !== APP_VERSION) {
+        currentSettings.appVersion = APP_VERSION;
+        await firebaseDb.saveDoc('settings', 'app_settings', currentSettings);
+        console.log(`[Firebase] Verzija aplikacije ${APP_VERSION} upisana u bazu.`);
+      }
+    }
+  } catch (err) {
+    console.warn('[Firebase] Greška pri upisu verzije u bazu:', err.message);
+  }
+})();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -52,7 +70,8 @@ app.get('/api/config', (req, res) => {
       enabled: firebaseDb.isEnabled(),
       projectId: firebaseDb.isEnabled() ? (firebaseDb.db ? firebaseDb.db.projectId : 'firestore') : ''
     },
-    googleClientId: process.env.GOOGLE_CLIENT_ID || ''
+    googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+    appVersion: APP_VERSION
   });
 });
 
