@@ -14,7 +14,7 @@ const authRoutes = require('./routes/auth');
 const driveRoutes = require('./routes/drive');
 const firebaseDb = require('./utils/firebase');
 
-const APP_VERSION = '1.02';
+const APP_VERSION = '1.03';
 
 // ─── Firebase verzija sync ───────────────────────────────────────────────────
 (async () => {

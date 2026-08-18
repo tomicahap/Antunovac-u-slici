@@ -96,10 +96,13 @@ async function getAuthenticatedClient(session) {
   } else if (process.env.GOOGLE_REFRESH_TOKEN) {
     refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
     if (!activeSession) {
-      activeSession = {
-        accessToken: null,
-        tokenExpiry: null
-      };
+      if (!global.adminSession) {
+        global.adminSession = {
+          accessToken: null,
+          tokenExpiry: null
+        };
+      }
+      activeSession = global.adminSession;
     }
   }
 

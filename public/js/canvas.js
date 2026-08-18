@@ -903,7 +903,17 @@ const CanvasEngine = (function () {
       }
 
       const response = await fetch(url);
-      if (!response.ok) throw new Error('Greška pri dohvaćanju slike');
+      if (!response.ok) {
+        let errMsg = `Status: ${response.status} ${response.statusText}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errMsg += ` - ${errData.error}`;
+          }
+        } catch {}
+        console.error(`[CanvasEngine] Greška pri dohvaćanju slike s rute ${url}: ${errMsg}`);
+        throw new Error(`Greška pri dohvaćanju slike (${errMsg})`);
+      }
 
       const total = parseInt(meta?.size || response.headers.get('content-length'), 10);
       let loaded = 0;
