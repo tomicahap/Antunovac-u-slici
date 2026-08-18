@@ -651,6 +651,73 @@ const App = (function () {
     _imagesGridPopulated = true;
   }
 
+  let _currentPortraitTag = null;
+
+  function renderPortraitDetailComments(fileId) {
+    const list = document.getElementById('portrait-detail-comments-list');
+    const countEl = document.getElementById('portrait-detail-comments-count');
+    if (!list) return;
+
+    const comments = DB.getComments('image', fileId);
+    if (countEl) countEl.textContent = comments.length;
+
+    if (comments.length === 0) {
+      list.innerHTML = '<p class="text-muted" style="padding: 4px 0; font-size: 0.8rem;">Nema komentara.</p>';
+      return;
+    }
+
+    list.innerHTML = comments.map(c => `
+      <div class="comment-item" style="background: var(--bg-elevated); padding: 8px; border-radius: 4px; border: 1px solid var(--border); margin-bottom: 6px;">
+        <div style="font-weight: 600; color: var(--text-color); font-size: 0.75rem; display: flex; justify-content: space-between;">
+          <span>${UI.escapeHtml(c.author_name)}</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: normal;">${new Date(c.created_at).toLocaleDateString('hr-HR')}</span>
+        </div>
+        <div style="color: var(--text-secondary); margin-top: 4px; font-size: 0.75rem; line-height: 1.3;">${UI.escapeHtml(c.comment_text)}</div>
+      </div>
+    `).join('');
+  }
+
+  function openPortraitDetail(tag) {
+    _currentPortraitTag = tag;
+    const person = tag.person_id ? DB.getPersonById(tag.person_id) : null;
+    const name = `${person?.ime || tag?.person_ime || tag?.manualName || tag?.ime || ''} ${person?.prezime || tag?.person_prezime || ''}`.trim() || 'Nepoznata osoba';
+    const birthStr = person?.godina_rodenja || tag?.person_godina_rodenja || '?';
+    const deathStr = person?.godina_smrti || tag?.person_godina_smrti || '?';
+    let lifespan = '';
+    if (person?.godina_rodenja || person?.godina_smrti || tag?.person_godina_rodenja || tag?.person_godina_smrti) {
+      lifespan = `(${birthStr} - ${deathStr})`;
+    }
+
+    const imageRec = DB.getAllImages().find(img => img.id === tag.image_id || img.original_drive_id === tag.image_id);
+    const driveFileId = imageRec ? imageRec.original_drive_id : tag.image_id;
+
+    // Popuni podatke
+    document.getElementById('portrait-detail-name').textContent = name;
+    document.getElementById('portrait-detail-lifespan').textContent = lifespan;
+    document.getElementById('portrait-detail-filename').textContent = imageRec ? imageRec.original_filename : 'Nepoznato';
+
+    // Učitaj sliku
+    const imgContainer = document.getElementById('portrait-detail-img-container');
+    if (imgContainer) {
+      if (tag.portrait_drive_id) {
+        const imgUrl = DriveAPI.getThumbnailUrl(tag.portrait_drive_id, 800);
+        imgContainer.innerHTML = `<img src="${imgUrl}" alt="${name}" style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;">`;
+      } else {
+        const originalThumbUrl = DriveAPI.getThumbnailUrl(driveFileId, 800);
+        const widthPct = (100 / tag.width) * 100;
+        const leftPct = (tag.x / tag.width) * 100;
+        const topPct = (tag.y / tag.height) * 100;
+        imgContainer.innerHTML = `<img src="${originalThumbUrl}" style="position: absolute; width: ${widthPct}%; left: -${leftPct}%; top: -${topPct}%; max-width: none;">`;
+      }
+    }
+
+    // Učitaj komentare
+    renderPortraitDetailComments(driveFileId);
+
+    // Otvori modal
+    UI.openModal('modal-portrait-detail');
+  }
+
   function createPortraitItem(tag, person) {
     const el = document.createElement('div');
     el.className = 'gallery-item portrait-gallery-item';
@@ -705,20 +772,7 @@ const App = (function () {
     `;
 
     el.addEventListener('click', () => {
-      const imageRec = DB.getAllImages().find(img => img.id === tag.image_id || img.original_drive_id === tag.image_id);
-      if (imageRec) {
-        if (_userRole === 'visitor') {
-          CanvasEngine.setReadOnly(true);
-        } else {
-          CanvasEngine.setReadOnly(false);
-        }
-        openInEditor({
-          id: imageRec.original_drive_id,
-          name: imageRec.original_filename
-        });
-      } else {
-        UI.toast('Originalna slika nije pronađena.', 'error');
-      }
+      openPortraitDetail(tag);
     });
 
     return el;
@@ -1319,6 +1373,63 @@ const App = (function () {
       renderEditorComments(fileId);
       UI.toast('Komentar spremljen!', 'success');
     });
+
+    // Slanje komentara u detaljima portreta
+    document.getElementById('btn-portrait-detail-submit-comment')?.addEventListener('click', () => {
+      if (!_currentPortraitTag) return;
+      
+      const imageRec = DB.getAllImages().find(img => img.id === _currentPortraitTag.image_id || img.original_drive_id === _currentPortraitTag.image_id);
+      const fileId = imageRec ? imageRec.original_drive_id : _currentPortraitTag.image_id;
+      if (!fileId) return;
+
+      const authorInput = document.getElementById('portrait-detail-comment-author');
+      const textInput = document.getElementById('portrait-detail-comment-text');
+      const author = authorInput?.value.trim() || 'Posjetitelj';
+      const text = textInput?.value.trim();
+
+      if (!text) {
+        UI.toast('Unesite tekst komentara.', 'warning');
+        return;
+      }
+
+      DB.saveComment({
+        target_type: 'image',
+        target_id: fileId,
+        author_name: author,
+        comment_text: text
+      });
+
+      if (textInput) textInput.value = '';
+      renderPortraitDetailComments(fileId);
+      UI.toast('Komentar spremljen!', 'success');
+    });
+
+    // Prikaži cijelu sliku iz detalja portreta
+    document.getElementById('btn-portrait-detail-view-original')?.addEventListener('click', () => {
+      if (!_currentPortraitTag) return;
+      const tag = _currentPortraitTag;
+      UI.closeModal('modal-portrait-detail');
+
+      const imageRec = DB.getAllImages().find(img => img.id === tag.image_id || img.original_drive_id === tag.image_id);
+      if (imageRec) {
+        if (_userRole === 'visitor') {
+          CanvasEngine.setReadOnly(true);
+        } else {
+          CanvasEngine.setReadOnly(false);
+        }
+        openInEditor({
+          id: imageRec.original_drive_id,
+          name: imageRec.original_filename
+        });
+      } else {
+        UI.toast('Originalna slika nije pronađena.', 'error');
+      }
+    });
+
+    // Zatvaranje/Nazad modal za portret
+    const closePortraitDetail = () => UI.closeModal('modal-portrait-detail');
+    document.getElementById('modal-portrait-detail-close')?.addEventListener('click', closePortraitDetail);
+    document.getElementById('btn-portrait-detail-back')?.addEventListener('click', closePortraitDetail);
 
     // Natrag na galeriju
     document.getElementById('btn-back-to-gallery')?.addEventListener('click', () => UI.showView('gallery'));

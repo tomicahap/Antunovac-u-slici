@@ -1,6 +1,6 @@
 {
   "name": "antunovac-fotografije",
-  "version": "1.04",
+  "version": "1.05",
   "description": "Aplikacija za obradu arhivskih i obiteljskih fotografija s oznacavanjem lica i Google Drive sinkronizacijom",
   "main": "server.js",
   "scripts": {
