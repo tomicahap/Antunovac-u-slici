@@ -966,7 +966,7 @@
           <h3 id="portrait-detail-name" style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0 0 4px 0;"></h3>
           <p id="portrait-detail-lifespan" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 12px 0;"></p>
           <div style="font-size: 0.8rem; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 4px;">
-            <div><strong>Izvorna slika:</strong> <span id="portrait-detail-filename">--</span></div>
+            <div><strong>Izvorna slika:</strong> <a href="#" id="portrait-detail-file-link" style="color: var(--color-primary); text-decoration: underline; font-weight: 600; cursor: pointer;">--</a></div>
           </div>
         </div>
         
@@ -991,9 +991,6 @@
           
           <!-- Unos novog komentara -->
           <div style="border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
-            <div class="form-group" style="margin: 0;">
-              <input type="text" id="portrait-detail-comment-author" class="form-input form-input-sm" placeholder="Vaše ime (Zadano: Posjetitelj)" style="font-size: 0.8rem; padding: 6px 10px;">
-            </div>
             <div style="display: flex; gap: 8px;">
               <input type="text" id="portrait-detail-comment-text" class="form-input form-input-sm" placeholder="Napišite komentar..." style="flex: 1; font-size: 0.8rem; padding: 6px 10px;">
               <button class="btn btn-primary btn-sm" id="btn-portrait-detail-submit-comment" style="padding: 6px 16px; font-size: 0.8rem;">Pošalji</button>

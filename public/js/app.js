@@ -694,14 +694,34 @@ const App = (function () {
     // Popuni podatke
     document.getElementById('portrait-detail-name').textContent = name;
     document.getElementById('portrait-detail-lifespan').textContent = lifespan;
-    document.getElementById('portrait-detail-filename').textContent = imageRec ? imageRec.original_filename : 'Nepoznato';
+    const fileLink = document.getElementById('portrait-detail-file-link');
+    if (fileLink) {
+      fileLink.textContent = imageRec ? imageRec.original_filename : 'Nepoznato';
+      if (imageRec) {
+        fileLink.onclick = (e) => {
+          e.preventDefault();
+          UI.closeModal('modal-portrait-detail');
+          if (_userRole === 'visitor') {
+            CanvasEngine.setReadOnly(true);
+          } else {
+            CanvasEngine.setReadOnly(false);
+          }
+          openInEditor({
+            id: imageRec.original_drive_id,
+            name: imageRec.original_filename
+          });
+        };
+      } else {
+        fileLink.onclick = null;
+      }
+    }
 
     // Učitaj sliku
     const imgContainer = document.getElementById('portrait-detail-img-container');
     if (imgContainer) {
       if (tag.portrait_drive_id) {
         const imgUrl = DriveAPI.getThumbnailUrl(tag.portrait_drive_id, 800);
-        imgContainer.innerHTML = `<img src="${imgUrl}" alt="${name}" style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;">`;
+        imgContainer.innerHTML = `<img src="${imgUrl}" alt="${name}" style="width: 100%; height: 100%; object-fit: contain; display: block;">`;
       } else {
         const originalThumbUrl = DriveAPI.getThumbnailUrl(driveFileId, 800);
         const widthPct = (100 / tag.width) * 100;
@@ -1382,9 +1402,8 @@ const App = (function () {
       const fileId = imageRec ? imageRec.original_drive_id : _currentPortraitTag.image_id;
       if (!fileId) return;
 
-      const authorInput = document.getElementById('portrait-detail-comment-author');
       const textInput = document.getElementById('portrait-detail-comment-text');
-      const author = authorInput?.value.trim() || 'Posjetitelj';
+      const author = _userRole === 'admin' ? 'Administrator' : 'Posjetitelj';
       const text = textInput?.value.trim();
 
       if (!text) {
